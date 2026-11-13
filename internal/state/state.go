@@ -141,6 +141,9 @@ type State struct {
 	// ModelAliases 是模型别名表：<vendorID>:<官方模型 ID> → 对外别名。
 	ModelAliases map[string]string `json:"model_aliases,omitempty"`
 
+	// ModelContexts 按供应商和官方模型 ID 保存上下文覆盖值；缺省时沿用上游。
+	ModelContexts map[string]int64 `json:"model_contexts,omitempty"`
+
 	// AccountAliases 是账号别名表：账号身份（FileID）→ 展示别名。
 	//
 	// 键必须是稳定账号身份，不能用昵称/邮箱：前者跨账号不唯一、上游改一次就变，
@@ -202,6 +205,7 @@ func New() *State {
 		Tasks:          map[string]TaskRecord{},
 		Claim:          map[string]ClaimRecord{},
 		ModelAliases:   map[string]string{},
+		ModelContexts:  map[string]int64{},
 		AccountAliases: map[string]string{},
 		TaskSchedules:  map[string][]int{},
 	}
@@ -285,6 +289,9 @@ func normalize(state *State) {
 	if state.ModelAliases == nil {
 		state.ModelAliases = map[string]string{}
 	}
+	if state.ModelContexts == nil {
+		state.ModelContexts = map[string]int64{}
+	}
 	if state.AccountAliases == nil {
 		state.AccountAliases = map[string]string{}
 	}
@@ -345,6 +352,10 @@ func clone(state *State) State {
 	out.ModelAliases = make(map[string]string, len(state.ModelAliases))
 	for key, value := range state.ModelAliases {
 		out.ModelAliases[key] = value
+	}
+	out.ModelContexts = make(map[string]int64, len(state.ModelContexts))
+	for key, value := range state.ModelContexts {
+		out.ModelContexts[key] = value
 	}
 	out.AccountAliases = make(map[string]string, len(state.AccountAliases))
 	for key, value := range state.AccountAliases {

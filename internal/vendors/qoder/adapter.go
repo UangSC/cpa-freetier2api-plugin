@@ -218,7 +218,7 @@ func (v *adapter) Execute(ctx context.Context, cred *core.Credential, req *core.
 	// 复用 bridge 的 chat-completions 组装逻辑，但把结果写进内存而不是
 	// http.ResponseWriter——插件侧不做 HTTP 响应，只产出载荷。
 	recorder := newPayloadRecorder()
-	if errRun := RunChatCompletions(b, req.Payload, recorder); errRun != nil {
+	if errRun := RunChatCompletions(b, req.Payload, recorder, req.ContextLength); errRun != nil {
 		return nil, errRun
 	}
 	return &pluginapi.ExecutorResponse{
@@ -237,7 +237,7 @@ func (v *adapter) ExecuteStream(ctx context.Context, cred *core.Credential, req 
 	if errBridge != nil {
 		return errBridge
 	}
-	return StreamChatCompletions(ctx, b, req.Payload, sink.Emit)
+	return StreamChatCompletions(ctx, b, req.Payload, sink.Emit, req.ContextLength)
 }
 
 // ---- 额度与签到 ----

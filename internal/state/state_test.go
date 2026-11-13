@@ -21,6 +21,7 @@ func TestStoreRoundTripPreservesFields(t *testing.T) {
 		s.PromptMode = "append"
 		s.DisabledModels = []string{"vendor:model"}
 		s.ModelAliases = map[string]string{"vendor:model": "alias"}
+		s.ModelContexts = map[string]int64{"vendor:model": 400_000}
 		s.AccountAliases = map[string]string{"workbuddycn-u1": "工作号"}
 		s.Checkin["u1"] = CheckinRecord{LastDate: "2026-10-18", Streak: 3}
 		s.Tasks["u1\x1fchat_5"] = TaskRecord{LastStatus: "done", Credit: 10}
@@ -39,6 +40,14 @@ func TestStoreRoundTripPreservesFields(t *testing.T) {
 	}
 	if len(got.DisabledModels) != 1 || got.ModelAliases["vendor:model"] != "alias" {
 		t.Fatalf("model fields lost: %#v", got)
+	}
+	if got.ModelContexts["vendor:model"] != 400_000 {
+		t.Fatalf("model context lost: %#v", got.ModelContexts)
+	}
+	snapshot := reloaded.Snapshot()
+	snapshot.ModelContexts["vendor:model"] = 1
+	if reloaded.Snapshot().ModelContexts["vendor:model"] != 400_000 {
+		t.Fatal("snapshot shares context map with live state")
 	}
 	if got.AccountAliases["workbuddycn-u1"] != "工作号" {
 		t.Fatalf("account aliases lost: %#v", got.AccountAliases)

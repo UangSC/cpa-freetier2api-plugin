@@ -45,6 +45,7 @@ type Catalog struct {
 	settings ModelSettings
 	disabled map[string]bool
 	aliases  map[string]string
+	contexts map[string]int64
 	// cached 是各供应商最近一次拿到的**官方 ID** 清单（控制台回读用）。
 	cached map[string]cachedVendor
 
@@ -75,6 +76,7 @@ func NewCatalog(store *state.Store, registry *core.Registry) *Catalog {
 		registry: registry,
 		disabled: map[string]bool{},
 		aliases:  map[string]string{},
+		contexts: map[string]int64{},
 		cached:   map[string]cachedVendor{},
 		probing:  map[string]chan struct{}{},
 		probeAt:  map[string]time.Time{},
@@ -97,6 +99,12 @@ func (c *Catalog) Configure(settings ModelSettings) {
 func (c *Catalog) ReloadFromState(snapshot state.State) {
 	c.mu.Lock()
 	c.reloadAliasesLocked(snapshot.ModelAliases)
+	c.contexts = make(map[string]int64, len(snapshot.ModelContexts))
+	for key, value := range snapshot.ModelContexts {
+		if value > 0 && value <= MaxModelContextLength {
+			c.contexts[strings.ToLower(c.canonicalAliasKey(key))] = value
+		}
+	}
 	c.mu.Unlock()
 	c.reloadDisabledWith(snapshot.DisabledModels)
 }
@@ -733,7 +741,7 @@ func (c *Catalog) AliasFor(vendorID, modelID string) string {
 func (c *Catalog) ApplyAliases(vendorID string, models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if len(models) == 0 || (c.settings.ModelNameTag == ModelNameTagOff && len(c.aliases) == 0) {
+	if len(models) == 0 || (c.settings.ModelNameTag == ModelNameTagOff && len(c.aliases) == 0 && len(c.contexts) == 0) {
 		return models
 	}
 	prefix := strings.ToLower(strings.TrimSpace(vendorID)) + ":"
@@ -747,6 +755,10 @@ func (c *Catalog) ApplyAliases(vendorID string, models []pluginapi.ModelInfo) []
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
 		bare := strings.TrimSpace(model.ID)
+		if limit := c.contexts[contextScopedKey(vendorID, bare)]; limit > 0 {
+			model.ContextLength = limit
+			model.InputTokenLimit = limit
+		}
 		manual := c.aliases[prefix+bare]
 		tagged := c.taggedModelID(vendorID, bare)
 		switch {

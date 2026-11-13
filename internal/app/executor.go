@@ -49,10 +49,11 @@ type rpcExecutorStreamResponse struct {
 
 // preparedExecution 汇集一次执行的同步校验结果。
 type preparedExecution struct {
-	rpc        executorRPCRequest
-	vendor     core.Vendor
-	credential *core.Credential
-	model      string
+	rpc           executorRPCRequest
+	vendor        core.Vendor
+	credential    *core.Credential
+	model         string
+	contextLength int64
 	// modelAliased 报告请求命中了别名：出站前需要把请求体里的模型名一并还原。
 	modelAliased bool
 }
@@ -66,11 +67,12 @@ func (p preparedExecution) executeRequest() *core.ExecuteRequest {
 		payload = rewritePayloadModel(payload, p.model)
 	}
 	return &core.ExecuteRequest{
-		Model:    p.model,
-		Payload:  payload,
-		Headers:  p.rpc.Headers,
-		ClientIP: core.ExtractClientIP(p.rpc.Headers),
-		Stream:   p.rpc.Stream,
+		Model:         p.model,
+		ContextLength: p.contextLength,
+		Payload:       payload,
+		Headers:       p.rpc.Headers,
+		ClientIP:      core.ExtractClientIP(p.rpc.Headers),
+		Stream:        p.rpc.Stream,
 	}
 }
 
@@ -301,6 +303,7 @@ func (a *App) prepareExecution(request []byte) (preparedExecution, error) {
 	// 因此还原必须发生在两者之前。
 	prepared.model = a.resolveOutboundModel(vendor.ID(), bareModel)
 	prepared.modelAliased = prepared.model != bareModel
+	prepared.contextLength = a.models.ContextLengthFor(vendor.ID(), prepared.model)
 
 	// 检查模型是否已被插件配置禁用（禁用键是 vendor:model，跨供应商互不影响）。
 	// 用官方 ID 判定：管理页展示与写入的禁用键都是官方 ID，别名只是对外名字。

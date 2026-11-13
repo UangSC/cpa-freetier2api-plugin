@@ -17,22 +17,24 @@ import (
 // 刻意自定义而不直接回传 pluginapi.ModelInfo：后者没有 json tag，
 // 字段名会变成 Go 字段名，页面按小写键读会全部拿到 undefined。
 type consoleModel struct {
-	ID              string   `json:"id"`
-	ScopeID         string   `json:"scope_id"`
-	VendorID        string   `json:"vendor_id"`
-	VendorName      string   `json:"vendor_name"`
-	Realm           string   `json:"realm"`
-	Name            string   `json:"name,omitempty"`
-	Alias           string   `json:"alias,omitempty"`
-	Description     string   `json:"description,omitempty"`
-	ContextLength   int64    `json:"context_length,omitempty"`
-	MaxOutputTokens int64    `json:"max_output_tokens,omitempty"`
-	Efforts         []string `json:"efforts,omitempty"`
-	DefaultEffort   string   `json:"default_effort,omitempty"`
-	SupportsImages  bool     `json:"supports_images,omitempty"`
-	SupportsTools   bool     `json:"supports_tools,omitempty"`
-	Credits         string   `json:"credits,omitempty"`
-	Disabled        bool     `json:"disabled,omitempty"`
+	ID                    string   `json:"id"`
+	ScopeID               string   `json:"scope_id"`
+	VendorID              string   `json:"vendor_id"`
+	VendorName            string   `json:"vendor_name"`
+	Realm                 string   `json:"realm"`
+	Name                  string   `json:"name,omitempty"`
+	Alias                 string   `json:"alias,omitempty"`
+	Description           string   `json:"description,omitempty"`
+	ContextLength         int64    `json:"context_length,omitempty"`
+	UpstreamContextLength int64    `json:"upstream_context_length"`
+	ContextOverride       int64    `json:"context_override,omitempty"`
+	MaxOutputTokens       int64    `json:"max_output_tokens,omitempty"`
+	Efforts               []string `json:"efforts,omitempty"`
+	DefaultEffort         string   `json:"default_effort,omitempty"`
+	SupportsImages        bool     `json:"supports_images,omitempty"`
+	SupportsTools         bool     `json:"supports_tools,omitempty"`
+	Credits               string   `json:"credits,omitempty"`
+	Disabled              bool     `json:"disabled,omitempty"`
 }
 
 func (s *Service) handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
@@ -83,6 +85,11 @@ func (s *Service) handleModelsList(req pluginapi.ManagementRequest) pluginapi.Ma
 	for index := range models {
 		models[index].Disabled = manager.IsDisabled(models[index].VendorID, models[index].ID)
 		models[index].Alias = manager.AliasFor(models[index].VendorID, models[index].ID)
+		models[index].UpstreamContextLength = models[index].ContextLength
+		models[index].ContextOverride = manager.ContextOverride(models[index].VendorID, models[index].ID)
+		if models[index].ContextOverride > 0 {
+			models[index].ContextLength = models[index].ContextOverride
+		}
 	}
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].VendorName != models[j].VendorName {

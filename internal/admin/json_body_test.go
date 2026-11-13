@@ -74,6 +74,7 @@ func TestManagementHandlersRejectMalformedJSON(t *testing.T) {
 		"tasks/auto":      service.handleTasksAuto,
 		"models/toggle":   service.modelToggleHandler,
 		"models/alias":    service.modelAliasHandler,
+		"models/context":  service.modelContextHandler,
 		"login/callback":  service.handleLoginCallbackRequest,
 	}
 	for name, handler := range handlers {

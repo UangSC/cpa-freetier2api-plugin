@@ -88,6 +88,8 @@ type Vendor interface {
 type ExecuteRequest struct {
 	// Model 是剥掉供应商前缀后的裸模型名。
 	Model string
+	// ContextLength 是模型的有效上下文窗口；0 表示供应商自行选择。
+	ContextLength int64
 	// Payload 是宿主翻译好的 chat-completions 请求体。
 	Payload []byte
 	// Headers 是客户端请求头。

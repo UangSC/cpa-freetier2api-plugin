@@ -55,7 +55,7 @@
 
 ### 方式二：手动安装 Release 动态库
 
-从 [Releases](https://github.com/Likhixang/cpa-freetier2api-plugin/releases) 下载对应平台的归档包，解压后将动态库放入 CPA 插件目录，并在 `config.yaml` 中启用：
+从 [Releases](https://github.com/UangSC/cpa-freetier2api-plugin/releases) 下载对应平台的归档包，解压后将动态库放入 CPA 插件目录，并在 `config.yaml` 中启用：
 
 ```yaml
 plugins:
@@ -125,6 +125,18 @@ curl http://localhost:8317/v1/messages \
 账号概览的「账号」列默认显示上游回传的昵称/邮箱，部分平台只给不可修改的默认昵称，多账号时很难分辨。点击该列的名称或 `✎` 图标即可设置自定义别名，编辑框会预填当前名称；展示顺序变为 **别名 → 上游昵称/邮箱 → 文件名 → 账号 ID**。留空保存、或填回原名称，都视为不设别名（直接清除记录、沿用上游名称），未设置别名时行为不变。
 
 别名按**账号身份**（凭据文件名，即 `state.json` 里的 `account_aliases` 键）记录，与上游昵称、token 无关，因此 token 刷新、重登写回同一凭证文件后别名都不会丢。
+
+### 5. 上下文自动识别与手动编辑
+
+Qoder 模型默认采用上游 `context_config` 中最大的可用窗口，例如同时提供 200K、400K、1M 时使用 1M，并同步更新出站请求的 `model_config.max_input_tokens`。没有档位信息时沿用上游 `max_input_tokens`，不会凭空补一个 1M。
+
+在模型列表点击「上下文」列的数值或 `✎`，输入整数 token 数、`400K` 或 `1M`，按回车或移开焦点保存；按 Esc 取消，清空保存恢复自动值。K/M 使用十进制，200,000 显示为 200K，1,000,000 显示为 1M。
+
+自定义值按 `<供应商 ID>:<官方模型 ID>` 保存到插件 `state.json` 的 `model_contexts`，不修改账号凭证。设置不会串到其他供应商的同名模型，刷新模型、修改别名和重启后仍保留；恢复自动值后会跟随最新上游清单。保存后控制台沿用已有机制同步宿主模型注册表，调用从新请求开始使用设置。
+
+所有供应商支持修改注册给客户端的上下文声明；Qoder 还会把有效值写入上游请求。手工填写不会提升供应商实际能力，其他供应商的上游请求参数保持其原有协议处理。
+
+管理接口：`POST /plugins/freetier2api/models/context`，请求示例 `{"model":"qodercn:deepseek-flash","context_length":1000000}`；`context_length: 0` 表示恢复自动值。填写范围为 0 到 100,000,000 的整数，范围上限只是输入校验，不代表上游支持该窗口。
 
 ## 配置说明
 

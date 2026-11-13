@@ -1,10 +1,42 @@
 package qoder
 
 import (
+	"encoding/json"
 	"testing"
 
 	"freetier2api-plugin/internal/core"
 )
+
+func TestExtractModelsUsesLargestAdvertisedContext(t *testing.T) {
+	var raw []interface{}
+	if err := json.Unmarshal([]byte(`[
+		{"key":"dfmodel","display_name":"DeepSeek-Flash","enable":true,"max_input_tokens":180000,
+		 "context_config":{"200K":{"is_default":true,"token_count":200000},"400K":{"token_count":400000},"1M":{"token_count":1000000}}},
+		{"key":"fallback","max_input_tokens":96000},
+		{"key":"invalid","max_input_tokens":32000,"context_config":{"bad":null,"negative":{"token_count":-1}}}
+	]`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	models := extractModels(raw)
+	for index, want := range []int{1_000_000, 96_000, 32_000} {
+		if got := models[index].ContextWindow; got != want {
+			t.Fatalf("model %d context = %d, want %d", index, got, want)
+		}
+	}
+	var cn, global modelIndex
+	cn.replace(models)
+	global.replace([]Model{{Key: "dfmodel", DisplayName: "DeepSeek-Flash", ContextWindow: 200_000}})
+	if cn.ContextWindowFor("DeepSeek-Flash") != 1_000_000 || cn.ContextWindowFor("DFMODEL") != 1_000_000 {
+		t.Fatal("context lookup must support both slug and upstream key")
+	}
+	if global.ContextWindowFor("deepseek-flash") != 200_000 {
+		t.Fatal("context leaked across regions")
+	}
+	cn.replace(nil)
+	if cn.ContextWindowFor("dfmodel") != 0 {
+		t.Fatal("stale context survived model replacement")
+	}
+}
 
 func TestCanonicalModelID(t *testing.T) {
 	cases := []struct {

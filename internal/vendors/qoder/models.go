@@ -24,8 +24,9 @@ import (
 // 清单的 {key, display_name} 配对里。写死一张表意味着上游每换一个模型就要
 // 改代码，而且容易把两个不同模型误绑到同一个名字；从清单推导则天然跟随上游。
 type modelIndex struct {
-	mu     sync.RWMutex
-	byName map[string]string
+	mu       sync.RWMutex
+	byName   map[string]string
+	contexts map[string]int64
 }
 
 // replace 用一批上游模型条目重建索引，返回「上游 key → 对外 ID」。
@@ -34,6 +35,7 @@ type modelIndex struct {
 // 由调用方跳过——宿主按 ID 匹配模型，注册两个相同 ID 只会让其中一个永远选不到。
 func (i *modelIndex) replace(models []Model) map[string]string {
 	byName := make(map[string]string, len(models)*2)
+	contexts := make(map[string]int64, len(models))
 	slugByKey := make(map[string]string, len(models))
 	for _, model := range models {
 		key := strings.TrimSpace(model.Key)
@@ -50,6 +52,7 @@ func (i *modelIndex) replace(models []Model) map[string]string {
 		}
 		slugByKey[key] = id
 		byName[id] = key
+		contexts[strings.ToLower(key)] = int64(model.ContextWindow)
 		// 老客户端仍可能直接发上游 key（dmodel / gmodel …）：一并接受。
 		// 对外 ID 优先——万一某个 slug 恰好等于另一个模型的上游 key，
 		// 以清单里声明的 slug 为准。
@@ -60,6 +63,7 @@ func (i *modelIndex) replace(models []Model) map[string]string {
 	}
 	i.mu.Lock()
 	i.byName = byName
+	i.contexts = contexts
 	i.mu.Unlock()
 	return slugByKey
 }
@@ -74,6 +78,16 @@ func (i *modelIndex) UpstreamKey(name string) (string, bool) {
 	defer i.mu.RUnlock()
 	key, ok := i.byName[trimmed]
 	return key, ok
+}
+
+func (i *modelIndex) ContextWindowFor(name string) int64 {
+	if i == nil {
+		return 0
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	key := i.byName[strings.ToLower(strings.TrimSpace(name))]
+	return i.contexts[strings.ToLower(key)]
 }
 
 // canonicalModelID 把上游 display_name 规范成对外模型 ID：

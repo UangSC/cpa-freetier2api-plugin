@@ -48,7 +48,7 @@ import (
 // 裸 JSON 载荷，帧包装交给宿主。
 
 // RunChatCompletions 执行一次非流式 chat-completions，把响应体写进 w。
-func RunChatCompletions(b *Bridge, payload []byte, w io.Writer) error {
+func RunChatCompletions(b *Bridge, payload []byte, w io.Writer, contextLength int64) error {
 	req, errDecode := decodeChatRequest(payload)
 	if errDecode != nil {
 		return errDecode
@@ -60,7 +60,7 @@ func RunChatCompletions(b *Bridge, payload []byte, w io.Writer) error {
 	var content strings.Builder
 	var toolCallBuf []interface{}
 	var inputTokens, outputTokens int
-	errCall := b.CallQoder(context.Background(), InferAgent(req.Model), messages, req.Model, req.Tools, func(d Delta) {
+	errCall := b.CallQoderWithOpts(context.Background(), InferAgent(req.Model), messages, req.Model, req.Tools, CallOpts{ContextWindow: contextLength}, func(d Delta) {
 		if d.InputTokens > 0 || d.OutputTokens > 0 {
 			inputTokens, outputTokens = d.InputTokens, d.OutputTokens
 		}
@@ -111,7 +111,7 @@ func RunChatCompletions(b *Bridge, payload []byte, w io.Writer) error {
 //
 // emit 收到的是裸 JSON 载荷，外层由 hostStreamSink.Emit 统一格式化为合法的 SSE 格式。
 // ctx 由调用方传入：客户端断开时上游请求必须跟着取消，否则生成继续跑、额度照扣。
-func StreamChatCompletions(ctx context.Context, b *Bridge, payload []byte, emit func([]byte) error) error {
+func StreamChatCompletions(ctx context.Context, b *Bridge, payload []byte, emit func([]byte) error, contextLength int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -128,7 +128,7 @@ func StreamChatCompletions(ctx context.Context, b *Bridge, payload []byte, emit 
 	// emitErr 记下客户端侧写失败：SSE 一旦写不出去（浏览器断开、上游连接
 	// 被掐），继续生成只会白烧额度，必须停下来并把错误交给调用方。
 	var emitErr error
-	errCall := b.CallQoder(ctx, InferAgent(req.Model), messages, req.Model, req.Tools, func(d Delta) {
+	errCall := b.CallQoderWithOpts(ctx, InferAgent(req.Model), messages, req.Model, req.Tools, CallOpts{ContextWindow: contextLength}, func(d Delta) {
 		if emitErr != nil {
 			return
 		}
@@ -1636,33 +1636,16 @@ func extractModels(rawList []interface{}) []Model {
 			PriceFactor:    FloatPtr(m, "price_factor"),
 		}
 		if cc, ok := m["context_config"].(map[string]interface{}); ok {
-			var defaultCfg map[string]interface{}
+			// 注册模型的最大能力，避免把官方默认档位误报成模型上限。
 			for _, cfg := range cc {
 				cfgMap, _ := cfg.(map[string]interface{})
 				if cfgMap == nil {
 					continue
 				}
-				isDefault, _ := cfgMap["is_default"].(bool)
-				if isDefault {
-					defaultCfg = cfgMap
-					break
+				if tokens := int(FloatVal(cfgMap, "token_count")); tokens > model.ContextWindow {
+					model.ContextWindow = tokens
 				}
 			}
-			if defaultCfg == nil {
-				for _, cfg := range cc {
-					cfgMap, _ := cfg.(map[string]interface{})
-					if cfgMap != nil {
-						defaultCfg = cfgMap
-						break
-					}
-				}
-			}
-			if defaultCfg != nil {
-				model.ContextWindow = int(FloatVal(defaultCfg, "token_count"))
-			}
-		}
-		if model.ContextWindow == 0 {
-			model.ContextWindow = model.MaxInputTokens
 		}
 		if model.ContextWindow == 0 {
 			model.ContextWindow = model.MaxInputTokens
@@ -1687,8 +1670,9 @@ func DeepCopyMap(m map[string]interface{}) map[string]interface{} {
 
 // CallOpts 控制单次 CallQoder 的可选行为。
 type CallOpts struct {
-	IsReasoning bool // 是否启用推理模式（对应上游 model_config.is_reasoning）
-	MaxTokens   int  // 客户端请求的 max_tokens，0 表示使用模板默认值
+	IsReasoning   bool  // 是否启用推理模式（对应上游 model_config.is_reasoning）
+	MaxTokens     int   // 客户端请求的 max_tokens，0 表示使用模板默认值
+	ContextWindow int64 // 有效上下文窗口；0 时使用模型清单中的最大可用窗口
 }
 
 func (b *Bridge) CallQoder(ctx context.Context, agent string, messages []interface{}, model string, tools interface{}, onDelta func(Delta)) error {
@@ -1746,6 +1730,13 @@ func (b *Bridge) CallQoderWithOpts(ctx context.Context, agent string, messages [
 
 	if mc, ok := body["model_config"].(map[string]interface{}); ok {
 		mc["key"] = model
+		contextWindow := opts.ContextWindow
+		if contextWindow <= 0 {
+			contextWindow = b.models.ContextWindowFor(model)
+		}
+		if contextWindow > 0 {
+			mc["max_input_tokens"] = contextWindow
+		}
 		if opts.IsReasoning {
 			mc["is_reasoning"] = true
 		}

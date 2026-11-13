@@ -109,6 +109,7 @@ func (s *Service) managementRoutes(prefix string) []pluginapi.ManagementRoute {
 		{Method: "GET", Path: prefix + "/models", Description: "读取当前注册的模型清单。"},
 		{Method: "POST", Path: prefix + "/models/toggle", Description: "批量禁用/启用模型。"},
 		{Method: "POST", Path: prefix + "/models/alias", Description: "给模型设置/清除对外别名（跨供应商同名可合并路由）。"},
+		{Method: "POST", Path: prefix + "/models/context", Description: "设置模型上下文 token 数，0 表示恢复自动值。"},
 		{Method: "POST", Path: prefix + "/models/refresh", Description: "从上游拉取模型清单并缓存。"},
 		{Method: "GET", Path: prefix + "/logs", Description: "读取插件日志（增量）。"},
 		{Method: "POST", Path: prefix + "/settings", Description: "更新插件运行期设置（自动签到、任务排程、提示词）。"},
@@ -194,6 +195,9 @@ func (s *Service) Handle(request []byte) ([]byte, error) {
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, id.ID, "/models/alias"):
 		return core.OKEnvelope(s.modelAliasHandler(rpc))
+
+	case method == http.MethodPost && matchesManagementPath(rpc.Path, id.ID, "/models/context"):
+		return core.OKEnvelope(s.modelContextHandler(rpc))
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, id.ID, "/models/refresh"):
 		ctx, cancel := hostbridge.ManagementContext(rpc, requestTimeout)

@@ -1009,7 +1009,7 @@ details.fold > div { padding: 0 0 8px; }
     syncName();
 
     function syncName() {
-      nameSpan.textContent = saved || opts.fallback();
+      nameSpan.textContent = saved ? (opts.display ? opts.display(saved) : saved) : opts.fallback();
       wrap.setAttribute("title", opts.title(saved));
     }
 
@@ -1042,7 +1042,7 @@ details.fold > div { padding: 0 0 8px; }
         // 原样提交不该变成一条新记录）。
         if (!commit || next === saved || next === normalize(initial)) { restore(focusBack); return; }
         input.disabled = true;
-        opts.save(next).then(function (ok) {
+        Promise.resolve().then(function () { return opts.save(next); }).then(function (ok) {
           if (ok === false) { restore(focusBack); return; }
           saved = next;
           restore(focusBack);
@@ -1063,7 +1063,7 @@ details.fold > div { padding: 0 0 8px; }
       cell.appendChild(input);
       input.focus();
       // 光标放开头而非全选：预填是为了补前缀，全选会被第一次按键整体覆盖。
-      input.setSelectionRange(0, 0);
+      input.setSelectionRange(0, opts.selectAll ? input.value.length : 0);
     }
 
     wrap.addEventListener("click", beginEdit);
@@ -1956,9 +1956,7 @@ details.fold > div { padding: 0 0 8px; }
       return td;
     } },
     { key: "credits", header: "费用倍率", cell: modelCreditsCell },
-    { key: "context", header: "上下文", cell: function (m) {
-      return el("td", m.context_length ? formatTokens(m.context_length) : "—");
-    } },
+    { key: "context", header: "上下文", cell: modelContextCell },
     { key: "output", header: "输出上限", optional: true, defaultShow: false, cell: function (m) {
       return el("td", m.max_output_tokens ? formatTokens(m.max_output_tokens) : "—");
     } },
@@ -2206,6 +2204,48 @@ details.fold > div { padding: 0 0 8px; }
     });
   }
 
+  function parseContextTokens(value) {
+    var text = String(value || "").trim();
+    if (!text) return 0;
+    var match = /^(\d+(?:\.\d+)?)\s*([KM]?)$/i.exec(text);
+    if (!match) throw new Error("请输入 token 数、400K 或 1M；留空恢复自动值");
+    var scale = { "": 1, K: 1000, M: 1000000 }[match[2].toUpperCase()];
+    var tokens = Number(match[1]) * scale;
+    if (!Number.isSafeInteger(tokens) || tokens < 0 || tokens > 100000000) {
+      throw new Error("上下文必须是 0 到 100000000 之间的整数 token 数");
+    }
+    return tokens;
+  }
+
+  function modelContextCell(model) {
+    var automatic = typeof model.upstream_context_length === "number"
+      ? model.upstream_context_length : (Number(model.context_length) || 0);
+    var key = String(model.scope_id || model.id);
+    return editableCell({
+      saved: model.context_override ? String(model.context_override) : "",
+      fallback: function () { return automatic ? formatTokens(automatic) + " · 自动" : "—"; },
+      prefill: function () { return automatic ? String(automatic) : ""; },
+      display: function (saved) { return formatTokens(parseContextTokens(saved)) + " · 自定义"; },
+      placeholder: "token 数 / 400K / 1M，留空自动",
+      mono: true,
+      selectAll: true,
+      title: function () {
+        return "点击编辑上下文（token 数、400K、1M）；留空恢复自动值 "
+          + (automatic || "未知") + "。自定义值仍受供应商实际限制。";
+      },
+      save: function (next) {
+        var tokens = parseContextTokens(next);
+        return api("POST", "/models/context", { model: key, context_length: tokens }).then(function (data) {
+          if (!data || !data.ok) return false;
+          model.context_override = data.context_override || 0;
+          model.context_length = data.context_length || automatic;
+          syncModelConfig();
+          return true;
+        });
+      }
+    });
+  }
+
   // selectedModelIDs 取当前勾选的模型（用于批量操作）。
   function selectedModelIDs() {
     var ids = [];
@@ -2282,8 +2322,8 @@ details.fold > div { padding: 0 0 8px; }
   // formatTokens 把 token 数格式化为可读串。
   function formatTokens(value) {
     var n = Number(value) || 0;
-    if (n >= 1048576) return (n / 1048576).toFixed(1).replace(/\.0$/, "") + "M";
-    if (n >= 1024) return Math.round(n / 1024) + "K";
+    if (n >= 1000000) return Number((n / 1000000).toFixed(2)) + "M";
+    if (n >= 1000) return Number((n / 1000).toFixed(2)) + "K";
     return String(n);
   }
 
