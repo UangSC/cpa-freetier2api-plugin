@@ -7,6 +7,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -848,14 +849,16 @@ func (c *Catalog) untagModelID(vendorID, requested string) []string {
 //
 // 同一供应商内别名唯一：写入时清掉占用同名别名的旧模型，否则反查会命中两条。
 // 落盘时顺带把旧前缀键改写成现役键，旧配置自然迁移，不会留下清不掉的残留。
-func (c *Catalog) SetAlias(vendorID, bare, alias string) {
+func (c *Catalog) SetAlias(vendorID, bare, alias string) error {
 	if c.store == nil {
-		return
+		return fmt.Errorf("model state store is unavailable")
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	scoped := aliasScopedKey(vendorID, bare)
 	alias = strings.TrimSpace(alias)
 	var next map[string]string
-	c.store.Mutate(func(s *state.State) {
+	if err := c.store.MutateAndSave(func(s *state.State) {
 		next = make(map[string]string, len(s.ModelAliases)+1)
 		for key, value := range s.ModelAliases {
 			next[c.canonicalAliasKey(key)] = value
@@ -873,10 +876,11 @@ func (c *Catalog) SetAlias(vendorID, bare, alias string) {
 			next[scoped] = alias
 		}
 		s.ModelAliases = next
-	})
-	c.mu.Lock()
+	}); err != nil {
+		return err
+	}
 	c.reloadAliasesLocked(next)
-	c.mu.Unlock()
+	return nil
 }
 
 // VendorForAliasScope 解析 <vendor>:<model> 形式，供管理接口校验。

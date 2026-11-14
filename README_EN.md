@@ -116,6 +116,8 @@ curl http://localhost:8317/v1/messages \
 
 In the Models table of the console, click any model ID or its `✎` icon to assign an external alias. Assigning the same alias to models across different providers merges them into a single logical model ID in CLIProxyAPI for automatic cross-provider load balancing and failover.
 
+Aliases preserve case and punctuation: `deepseek-v4.1-flash` and `deepseek-v4-1-flash` are different external model IDs. After confirming the alias is written to disk, the console synchronizes CPA and checks that provider's account model registrations before reporting the effective ID. A write failure preserves the previous setting; synchronization failures, disabled models, and missing enabled accounts are reported separately from a successful save. Save an empty alias to restore the default model ID.
+
 ### 4. Account Aliases
 
 The Accounts table shows whatever nickname or email the upstream returns, and some platforms only hand out a default nickname that cannot be changed — with several accounts it becomes impossible to tell them apart. Click the account name or its `✎` icon to set a custom alias; the editor is prefilled with the current name, and the display order becomes **alias → upstream nickname/email → file name → account ID**. Saving an empty value, or typing the original name back, means "no alias" — the record is cleared and the upstream name is used, so behavior is unchanged when no alias is set.

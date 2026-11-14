@@ -1044,7 +1044,7 @@ details.fold > div { padding: 0 0 8px; }
         input.disabled = true;
         Promise.resolve().then(function () { return opts.save(next); }).then(function (ok) {
           if (ok === false) { restore(focusBack); return; }
-          saved = next;
+          saved = ok && typeof ok.value === "string" ? ok.value : next;
           restore(focusBack);
         }).catch(function (err) {
           // 保存失败：回到原值并提示（错误是需要用户知晓的，成功则静默）。
@@ -2179,6 +2179,8 @@ details.fold > div { padding: 0 0 8px; }
   //
   // 编辑框预填「当前生效 ID」（已设别名取别名，否则取官方 ID），省去重敲全名；
   // 光标置于开头（见 editableCell），便于直接在原名前补平台前缀。
+  var modelAliasSaveVersions = {};
+
   function modelIDCell(model) {
     var bareID = String(model.id || "");
     var key = String(model.scope_id || model.id);
@@ -2194,13 +2196,66 @@ details.fold > div { padding: 0 0 8px; }
           : "点击编辑对外模型 ID（留空即用官方 ID：" + bareID + "）";
       },
       save: function (next) {
+        var version = (modelAliasSaveVersions[key] || 0) + 1;
+        modelAliasSaveVersions[key] = version;
+        function notify(kind, message, duration) {
+          if (modelAliasSaveVersions[key] === version) banner(kind, message, duration);
+        }
         return api("POST", "/models/alias", { model: key, alias: next }).then(function (data) {
           if (!data) return false;
-          model.alias = next;
-          syncModelConfig();
-          return true;
+          var savedAlias = typeof data.alias === "string" ? data.alias : next;
+          model.alias = savedAlias;
+          notify("ok", "别名已保存，正在同步 CPA 模型列表：" + (savedAlias || bareID), 0);
+          return syncModelConfig().then(function (synced) {
+            if (!synced) {
+              notify("warn", "别名已保存，但 CPA 模型列表同步失败，请重试或重新打开插件页面。", 0);
+              return { value: savedAlias };
+            }
+            return verifyModelAlias(model, savedAlias, 0).then(function (effectiveID) {
+              if (effectiveID) notify("ok", "别名已保存并生效：" + bareID + " → " + effectiveID, 8000);
+              else notify("warn", "别名已保存；" + (model.disabled ? "模型当前已禁用" : "该供应商暂无已启用账号") + "，启用后才能核对生效。", 0);
+              return { value: savedAlias };
+            }).catch(function (err) {
+              notify("warn", "别名已保存，但生效核对未通过：" + err.message, 0);
+              return { value: savedAlias };
+            });
+          });
         });
       }
+    });
+  }
+
+  // 回读该供应商账号的宿主注册表，不能用其他供应商的同名模型充当生效证据。
+  function verifyModelAlias(model, alias, attempt) {
+    return api("GET", "/status").then(function (status) {
+      if (!status) throw new Error("管理连接未确认，请重新连接后核对。");
+      var accounts = (status.accounts || []).filter(function (account) {
+        return account.vendor_id === model.vendor_id && !account.disabled && (account.auth_id || account.file_id);
+      });
+      if (model.disabled || !accounts.length) {
+        return null;
+      }
+      var expected = alias || model.id;
+      var tag = (status.settings || {}).model_name_tag;
+      if (!alias && (tag === "prefix" || tag === "suffix")) {
+        var tagged = tag === "prefix" ? model.vendor_id + "-" + model.id : model.id + "-" + model.vendor_id;
+        var collision = allModels.some(function (item) {
+          return item.vendor_id === model.vendor_id && String(item.id).toLowerCase() === tagged.toLowerCase();
+        });
+        if (!collision) expected = tagged;
+      }
+      return Promise.all(accounts.map(function (account) {
+        return api("GET", hostPath("/auth-files/models?name=" + encodeURIComponent(account.auth_id || account.file_id)));
+      })).then(function (results) {
+        var registered = !status.restart_pending && results.some(function (result) {
+          return result && (result.models || []).some(function (item) { return item.id === expected; });
+        });
+        if (registered) return expected;
+        if (attempt >= 5) throw new Error("CPA 尚未注册模型「" + expected + "」，请检查账号状态或稍后重试。");
+        return new Promise(function (resolve) { setTimeout(resolve, 500); }).then(function () {
+          return verifyModelAlias(model, alias, attempt + 1);
+        });
+      });
     });
   }
 
@@ -2284,7 +2339,7 @@ details.fold > div { padding: 0 0 8px; }
   var MODEL_SYNC_DEBOUNCE_MS = 400;
   var modelSyncTimer = null;
   var modelSyncRunning = false;
-  var modelSyncPending = false;
+  var modelSyncWaiters = [];
   // 自愈只尝试一次：restart_pending 长时间为 true 时（宿主不支持自动重载），
   // 不能让每次 /status 都去写一遍配置。
   var modelSyncSelfHealed = false;
@@ -2293,29 +2348,40 @@ details.fold > div { padding: 0 0 8px; }
   // 连续操作（批量勾选、接连改别名）由防抖合并；同一时刻只跑一次，运行期间
   // 又来的变更在结束后补跑一次。
   function syncModelConfig() {
+    var result = new Promise(function (resolve) { modelSyncWaiters.push(resolve); });
     if (modelSyncTimer) { clearTimeout(modelSyncTimer); }
     modelSyncTimer = setTimeout(runModelSync, MODEL_SYNC_DEBOUNCE_MS);
+    return result;
   }
 
   function runModelSync() {
     modelSyncTimer = null;
-    if (modelSyncRunning) { modelSyncPending = true; return; }
+    if (modelSyncRunning) return;
     modelSyncRunning = true;
+    var waiters = modelSyncWaiters;
+    modelSyncWaiters = [];
     var configPath = hostPath("/plugins/freetier2api/config");
     api("GET", configPath).then(function (config) {
+      if (!config) throw new Error("管理连接未确认");
       // GET 返回的可能是空对象（该插件段尚未落过自定义配置），补成对象再合并。
       var body = (config && typeof config === "object") ? config : {};
       body.config_reloaded_at = new Date().toISOString();
       return api("PATCH", configPath, body);
-    }).then(function () {
+    }).then(function (result) {
+      if (!result) throw new Error("管理连接未确认");
       loadModels(false);
+      return true;
     }).catch(function (err) {
       // 失败必须让用户知道：调用拦截已生效，但 /v1/models 的增删还没同步。
       banner("err", "模型列表同步失败：" + err.message
         + "（可再操作一次重试；宿主版本过老时需手动重启一次）");
-    }).then(function () {
+      return false;
+    }).then(function (synced) {
       modelSyncRunning = false;
-      if (modelSyncPending) { modelSyncPending = false; syncModelConfig(); }
+      waiters.forEach(function (resolve) { resolve(synced); });
+      if (modelSyncWaiters.length && !modelSyncTimer) {
+        modelSyncTimer = setTimeout(runModelSync, MODEL_SYNC_DEBOUNCE_MS);
+      }
     });
   }
 

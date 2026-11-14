@@ -260,6 +260,16 @@ func (s *Service) modelAliasHandler(req pluginapi.ManagementRequest) pluginapi.M
 			"ok": false, "error": "别名不能包含空白字符",
 		})
 	}
-	s.deps.Model().SetAlias(vendorID, bare, alias)
-	return JSONResponse(http.StatusOK, map[string]any{"ok": true})
+	manager := s.deps.Model()
+	previous := manager.AliasFor(vendorID, bare)
+	if err := manager.SetAlias(vendorID, bare, alias); err != nil {
+		logger.Error("save model alias %s:%s failed: %v", vendorID, bare, err)
+		return JSONResponse(http.StatusInternalServerError, map[string]any{
+			"ok": false, "error": "模型别名写盘失败，原设置已保留，请检查状态目录权限和磁盘空间。",
+		})
+	}
+	logger.Info("model alias %s:%s: %q -> %q", vendorID, bare, previous, alias)
+	return JSONResponse(http.StatusOK, map[string]any{
+		"ok": true, "model": aliasScopedKey(vendorID, bare), "alias": alias, "restart_pending": true,
+	})
 }

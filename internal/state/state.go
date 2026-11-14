@@ -391,6 +391,29 @@ func (s *Store) Mutate(mutate func(*State)) {
 	s.mu.Unlock()
 }
 
+// MutateAndSave 用于必须确认写盘结果的用户设置。失败时恢复修改前的内存状态，
+// 保留原有后台写盘任务，避免接口报错后仍悄悄保存本次失败的修改。
+func (s *Store) MutateAndSave(mutate func(*State)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cache == nil {
+		s.cache = New()
+	}
+	previous := clone(s.cache)
+	mutate(s.cache)
+	if err := s.saveLocked(); err != nil {
+		s.cache = &previous
+		return err
+	}
+	s.dirty = false
+	s.flushing = false
+	if s.flushTimer != nil {
+		s.flushTimer.Stop()
+		s.flushTimer = nil
+	}
+	return nil
+}
+
 // Flush 立即把未落盘的修改写入磁盘，并取消挂起的定时器。
 //
 // 插件关停路径必须走它：只写盘不取消定时器，卸载后定时器仍会醒来碰状态。
