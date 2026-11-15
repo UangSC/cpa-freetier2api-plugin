@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"testing"
 
 	"freetier2api-plugin/cpasdk/pluginabi"
@@ -57,6 +58,12 @@ func TestSaveAuthFileAlignsUID(t *testing.T) {
 // 文件名一路来自上游登录响应/账号昵称，早期直接 filepath.Join(dir, name)：
 // 带 `/` 或 `..` 的取值会把凭证写到目录外，绝对路径更会直接忽略 dir。
 func TestSanitizeAuthFileName(t *testing.T) {
+	// Windows 把反斜杠视为路径分隔符；POSIX 把它作为文件名字符再替换。
+	// 两种结果都应收敛为安全基名，分别锁住所在平台的实际规则。
+	windowsPathWant := "_.._windows_evil.json"
+	if runtime.GOOS == "windows" {
+		windowsPathWant = "evil.json"
+	}
 	cases := []struct {
 		input string
 		want  string
@@ -65,7 +72,7 @@ func TestSanitizeAuthFileName(t *testing.T) {
 		{"  spaced.json  ", "spaced.json"},
 		{"../../etc/passwd", "passwd.json"},
 		{"/abs/path/traecn-u1.json", "traecn-u1.json"},
-		{`..\..\windows\evil.json`, `_.._windows_evil.json`}, // 反斜杠不是 POSIX 分隔符，替换后去掉前导点
+		{`..\..\windows\evil.json`, windowsPathWant},
 		{"name:with*bad?chars.json", "name_with_bad_chars.json"},
 		{"no-ext", "no-ext.json"},
 		{"...", ""},

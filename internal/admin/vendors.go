@@ -14,6 +14,10 @@ type vendorDescriptor struct {
 	SupportsCheckin bool   `json:"supports_checkin"`
 	AuthMode        string `json:"auth_mode"`
 	SupportsLogin   bool   `json:"supports_login"`
+	// CredentialImport 报告该供应商支持粘贴已有登录凭证 JSON。
+	CredentialImport bool `json:"credential_import"`
+	// CredentialImportHint 是供应商给用户的凭证获取和导入说明。
+	CredentialImportHint string `json:"credential_import_hint,omitempty"`
 	// SMSLogin 报告该供应商支持「手机号 + 短信验证码」两步登录表单。
 	SMSLogin bool `json:"sms_login"`
 	// PasteCallback 报告该供应商的登录是否需要（也支持）「粘贴 localhost 回调链接」兜底。
@@ -43,6 +47,10 @@ func (s *Service) buildVendorsPayload() map[string]any {
 		}
 		if _, okSMS := core.As[core.SMSLoginProvider](vendor); okSMS {
 			descriptor.SMSLogin = true
+		}
+		if importer, okImport := core.As[core.CredentialImportProvider](vendor); okImport {
+			descriptor.CredentialImport = true
+			descriptor.CredentialImportHint = strings.TrimSpace(importer.CredentialImportHint())
 		}
 		if submitter, okSubmit := core.As[core.CallbackSubmitter](vendor); okSubmit {
 			descriptor.PasteCallback = true

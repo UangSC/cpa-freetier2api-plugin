@@ -517,6 +517,9 @@ details.fold > div { padding: 0 0 8px; }
           <button class="act" id="btnLoginCancel">取消</button>
         </div>
         <div class="hint" id="loginStatus">等待授权…</div>
+        <div class="row" id="loginCredentialRow" hidden>
+          <button class="act" id="btnPasteCredential">粘贴凭证</button>
+        </div>
         <details id="loginPasteBox" hidden>
           <summary>回调没到插件？粘贴回调链接</summary>
           <div class="hint" id="loginPasteHint"></div>
@@ -533,12 +536,13 @@ details.fold > div { padding: 0 0 8px; }
       <div class="card" id="apiKeyBox" hidden>
         <h2 id="apiKeyTitle">添加 API Key 账号</h2>
         <div class="row">
-          <input type="password" id="inputApiKey" placeholder="输入 API Key（必填）" class="grow-2">
+          <input type="password" id="inputApiKey" placeholder="输入 API Key（必填）" class="grow-2" autocomplete="off" spellcheck="false">
           <input type="text" id="inputApiLabel" placeholder="备注名称（可选）" class="grow">
           <button class="act primary" id="btnSubmitApiKey">保存账号</button>
           <button class="act" id="btnCancelApiKey">取消</button>
         </div>
         <div class="hint" id="apiKeyHint">请输入从官网获取的 API Key，保存后自动在 auth 目录创建凭证。</div>
+        <div class="row"><button class="act" id="btnToggleCredentialMode" hidden>粘贴凭证</button></div>
       </div>
 
       <div id="accounts"></div>
@@ -2601,15 +2605,63 @@ details.fold > div { padding: 0 0 8px; }
   // 宿主按路径里的 "<provider>-auth-url" 把请求转给插件的 auth.login.start，
   // 插件完成登录后由宿主把凭证落盘。
   var loginTimer = null;
+  var loginPollGeneration = 0;
 
   function stopLoginPolling() {
+    loginPollGeneration++;
     if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
   }
 
   var currentApiKeyVendor = null;
+  var currentAccountInputMode = "api_key";
+  var currentLoginVendor = null;
+  var accountAddGeneration = 0;
   // currentLoginState 记着本次登录的 state：粘贴回调链接时要带回去，
   // 插件据此认出是哪一个会话的回调。
   var currentLoginState = "";
+
+  function supportsCredentialImport(vendor) {
+    // AutoClaw 国际版的旧适配器尚未声明通用能力，保留既有粘贴入口。
+    return !!vendor && (vendor.credential_import === true || vendor.id === "autoclawglobal");
+  }
+
+  function resetAccountAddFlow() {
+    accountAddGeneration++;
+    stopLoginPolling();
+    resetLoginCaptcha();
+    currentApiKeyVendor = null;
+    currentAccountInputMode = "api_key";
+    currentLoginVendor = null;
+    currentLoginState = "";
+    currentSmsVendor = null;
+    smsSessionKey = "";
+    ["inputApiKey", "inputApiLabel", "loginUrl", "loginPasteUrl", "inputSmsPhone", "inputSmsCode", "inputSmsLabel"].forEach(function (id) {
+      var field = document.getElementById(id);
+      if (field) field.value = "";
+    });
+    ["loginBox", "apiKeyBox", "smsBox", "loginCredentialRow", "loginPasteBox", "loginPasteRedirect"].forEach(function (id) {
+      var box = document.getElementById(id);
+      if (box) { box.hidden = true; if (id === "loginBox") box.style.display = ""; }
+    });
+    ["loginStatus", "loginPasteStatus", "smsStatus"].forEach(function (id) {
+      var status = document.getElementById(id);
+      if (status) status.textContent = "";
+    });
+    var redirect = document.getElementById("loginPasteRedirect");
+    if (redirect) redirect.removeAttribute("href");
+    var toggle = document.getElementById("btnToggleCredentialMode");
+    if (toggle) toggle.hidden = true;
+    [["btnSubmitApiKey", "保存账号"], ["btnSmsSend", "发送验证码"], ["btnSmsVerify", "登录并添加"], ["btnSubmitCallback", "提交回调链接"]].forEach(function (entry) {
+      var button = document.getElementById(entry[0]);
+      if (button) { button.disabled = false; button.textContent = entry[1]; }
+    });
+  }
+
+  function setupCredentialImportFallback(vendor) {
+    currentLoginVendor = vendor;
+    var row = document.getElementById("loginCredentialRow");
+    if (row) row.hidden = !supportsCredentialImport(vendor);
+  }
 
   // startVendorAdd 根据供应商能力决定「添加账号」的动作。
   //
@@ -2618,15 +2670,12 @@ details.fold > div { padding: 0 0 8px; }
   var MAX_ACCOUNTS_PER_VENDOR = 10;
 
   function startVendorAdd(vendor) {
-    var loginBox = document.getElementById("loginBox");
-    var apiKeyBox = document.getElementById("apiKeyBox");
-    stopLoginPolling();
+    if (!vendor) return;
+    resetAccountAddFlow();
     var existingCount = ((lastStatus && lastStatus.accounts) || []).filter(function (a) {
       return a.vendor_id === vendor.id;
     }).length;
     if (existingCount >= MAX_ACCOUNTS_PER_VENDOR) {
-      if (loginBox) loginBox.hidden = true;
-      if (apiKeyBox) apiKeyBox.hidden = true;
       banner("err", "每个供应商最多添加 " + MAX_ACCOUNTS_PER_VENDOR + " 个账号（" + vendor.name + " 已达上限）");
       return;
     }
@@ -2639,47 +2688,48 @@ details.fold > div { padding: 0 0 8px; }
     }
 
     if (vendor.supports_login !== false && vendor.auth_mode !== "apikey") {
-      if (apiKeyBox) apiKeyBox.hidden = true;
       startLogin(vendor);
       return;
     }
 
-    // API Key 型供应商：直接在页面展示输入框添加
-    if (loginBox) loginBox.hidden = true;
-    var smsBox = document.getElementById("smsBox");
-    if (smsBox) smsBox.hidden = true;
-    currentApiKeyVendor = vendor;
-    if (apiKeyBox) {
-      apiKeyBox.hidden = false;
-      document.getElementById("apiKeyTitle").textContent = "添加 " + vendor.name + " 账号";
-      document.getElementById("apiKeyHint").textContent = "请输入从官网申请的 API Key，保存后插件将自动在 auth 目录创建凭证文件。";
-      document.getElementById("inputApiKey").value = "";
-      document.getElementById("inputApiLabel").value = "";
-      document.getElementById("inputApiKey").focus();
+    if (vendor.auth_mode !== "apikey" && supportsCredentialImport(vendor)) {
+      startCredentialPaste(vendor);
+      return;
     }
+
+    // 旧 AutoClaw 国际版入口一直接收凭证 JSON；其他 API Key 渠道保持 API Key 模式。
+    if (vendor.id === "autoclawglobal") startCredentialPaste(vendor);
+    else startAccountCredentialInput(vendor, "api_key");
   }
 
-  // startCredentialPaste 打开通用凭证粘贴框（autoclawglobal 用）。
-  // 复用 apiKeyBox：单输入框贴 JSON，插件侧 ParseCredential 兼容。
+  // startCredentialPaste 根据供应商能力打开已有登录凭证的导入入口。
   function startCredentialPaste(vendor) {
-    stopLoginPolling();
-    resetLoginCaptcha();
-    clearLoginVariants();
+    if (!supportsCredentialImport(vendor)) return;
+    startAccountCredentialInput(vendor, "credential_json");
+  }
+
+  function startAccountCredentialInput(vendor, mode) {
+    resetAccountAddFlow();
     currentApiKeyVendor = vendor;
-    var login = document.getElementById("loginBox");
-    var sms = document.getElementById("smsBox");
-    if (login) login.hidden = true;
-    if (sms) sms.hidden = true;
+    currentAccountInputMode = mode;
     var apiKeyBox = document.getElementById("apiKeyBox");
     if (!apiKeyBox) return;
     apiKeyBox.hidden = false;
-    document.getElementById("apiKeyTitle").textContent = "粘贴 " + vendor.name + " 凭证";
-    document.getElementById("apiKeyHint").textContent =
-      "粘贴 AutoClaw 国际版凭证 JSON（含访问令牌与刷新令牌，可从 AutoClaw 桌面端登录态文件或 Agent2API 获取）。" +
-      "保存后插件会自动续期。";
-    document.getElementById("inputApiKey").value = "";
-    document.getElementById("inputApiLabel").value = "";
-    document.getElementById("inputApiKey").focus();
+    var importing = mode === "credential_json";
+    document.getElementById("apiKeyTitle").textContent = (importing ? "粘贴 " : "添加 ") + vendor.name + (importing ? " 凭证" : " 账号");
+    var hint = (vendor.credential_import_hint || "").trim();
+    if (!hint && vendor.id === "autoclawglobal") hint = "粘贴 AutoClaw 国际版凭证 JSON（含访问令牌与刷新令牌，可从 AutoClaw 桌面端登录态文件或 Agent2API 获取）。保存后插件会自动续期。";
+    document.getElementById("apiKeyHint").textContent = importing
+      ? hint || "粘贴该供应商的登录凭证 JSON，插件校验后会保存账号。"
+      : "请输入从官网申请的 API Key，保存后插件将自动在 auth 目录创建凭证文件。";
+    var input = document.getElementById("inputApiKey");
+    input.placeholder = importing ? "粘贴凭证 JSON（必填）" : "输入 API Key（必填）";
+    var toggle = document.getElementById("btnToggleCredentialMode");
+    if (toggle) {
+      toggle.hidden = !supportsCredentialImport(vendor) || vendor.auth_mode !== "apikey" || vendor.id === "autoclawglobal";
+      toggle.textContent = importing ? "改用 API Key" : "粘贴凭证";
+    }
+    input.focus();
   }
 
   // ---- 页面内人机验证登录（AutoClaw 国际版等）----
@@ -2696,11 +2746,8 @@ details.fold > div { padding: 0 0 8px; }
   var loginCaptchaGeneration = 0;
 
   function startCaptchaLogin(vendor) {
-    stopLoginPolling();
-    resetLoginCaptcha();
-    currentSmsVendor = null;
-    currentApiKeyVendor = null;
-    currentLoginState = "";
+    resetAccountAddFlow();
+    setupCredentialImportFallback(vendor);
     var login = document.getElementById("loginBox");
     var sms = document.getElementById("smsBox");
     var apiKey = document.getElementById("apiKeyBox");
@@ -2729,11 +2776,6 @@ details.fold > div { padding: 0 0 8px; }
       row.appendChild(btn);
       loginVariantButtons.push(btn);
     });
-    // 凭证粘贴兜底：卡片本身也会自动续期，用户可以随时改走这条路。
-    var pasteBtn = el("button", "粘贴凭证", "act");
-    pasteBtn.type = "button";
-    pasteBtn.addEventListener("click", function () { startCredentialPaste(vendor); });
-    row.appendChild(pasteBtn);
   }
 
   function setLoginVariantBusy(busy) {
@@ -2742,11 +2784,13 @@ details.fold > div { padding: 0 0 8px; }
 
   // beginCaptchaLogin 取控件参数并起一轮验证 → 换授权链接。
   function beginCaptchaLogin(vendor, variant) {
+    var generation = accountAddGeneration;
     var status = document.getElementById("loginStatus");
     setLoginVariantBusy(true);
     status.textContent = "正在准备人机验证…";
     resetLoginCaptcha();
     api("GET", "/login/captcha-config?vendor=" + encodeURIComponent(vendor.id)).then(function (data) {
+      if (generation !== accountAddGeneration || currentLoginVendor !== vendor) return;
       if (!data || !data.ok) throw new Error((data && data.message) || "获取风控验证配置失败");
       var config = data.captcha || {};
       if (!config.enabled) throw new Error("上游没有开启网页登录，请改用「粘贴凭证」");
@@ -2756,6 +2800,7 @@ details.fold > div { padding: 0 0 8px; }
         return requestLoginURL(vendor, variant, verifyParam);
       });
     }).catch(function (err) {
+      if (generation !== accountAddGeneration || currentLoginVendor !== vendor) return;
       status.textContent = "登录失败：" + ((err && err.message) || err);
       resetLoginCaptcha();
       setLoginVariantBusy(false);
@@ -2764,6 +2809,7 @@ details.fold > div { padding: 0 0 8px; }
 
   // requestLoginURL 用验证令牌换授权地址，并把粘贴回调的入口展开。
   function requestLoginURL(vendor, variant, verifyParam) {
+    var generation = accountAddGeneration;
     var status = document.getElementById("loginStatus");
     status.textContent = "人机验证通过，正在获取授权链接…";
     return api("POST", "/login/start", {
@@ -2773,6 +2819,7 @@ details.fold > div { padding: 0 0 8px; }
         ali_captcha_verify_param: verifyParam
       }
     }).then(function (data) {
+      if (generation !== accountAddGeneration || currentLoginVendor !== vendor) return false;
       if (!data || !data.ok) throw new Error((data && data.message) || "获取授权链接失败");
       if (!data.url) throw new Error("上游没有返回授权链接，请重试");
       currentLoginState = data.state || "";
@@ -2793,6 +2840,7 @@ details.fold > div { padding: 0 0 8px; }
       setLoginVariantBusy(false);
       return true;
     }).catch(function (err) {
+      if (generation !== accountAddGeneration || currentLoginVendor !== vendor) return false;
       // 不收起滑块：验证令牌是一次性的，换地址失败（多为 630014 已过期）
       // 让用户直接再拖一次比重新点入口更快。错误原因写在同一行。
       status.textContent = "获取授权链接失败：" + ((err && err.message) || err);
@@ -2946,9 +2994,7 @@ details.fold > div { padding: 0 0 8px; }
   var smsSessionKey = "";
 
   function startSmsLogin(vendor) {
-    stopLoginPolling();
-    resetLoginCaptcha();
-    clearLoginVariants();
+    resetAccountAddFlow();
     currentSmsVendor = vendor;
     smsSessionKey = "";
     var box = document.getElementById("smsBox");
@@ -2967,8 +3013,9 @@ details.fold > div { padding: 0 0 8px; }
 
   function startLogin(vendor) {
     if (vendor && vendor.sms_login) { startSmsLogin(vendor); return; }
-    resetLoginCaptcha();
-    clearLoginVariants();
+    resetAccountAddFlow();
+    setupCredentialImportFallback(vendor);
+    var generation = accountAddGeneration;
     // 三个添加入口（授权链接 / 短信验证码 / API Key）互斥：打开任一个前先收起另外两个。
     var smsBox = document.getElementById("smsBox");
     if (smsBox) { smsBox.hidden = true; }
@@ -3006,6 +3053,7 @@ details.fold > div { padding: 0 0 8px; }
     // 插件再按 vendor 参数选具体供应商实例。路径里不能带 vendor——
     // 宿主会把它当成 provider 名去校验，直接 404。
     api("GET", hostPath("/freetier-auth-url?vendor=" + encodeURIComponent(vendor.id))).then(function (data) {
+      if (generation !== accountAddGeneration || currentLoginVendor !== vendor) return;
       if (!data || !data.url) {
         status.textContent = "获取授权链接失败：" + ((data && data.error) || "响应缺少 url");
         return;
@@ -3016,15 +3064,20 @@ details.fold > div { padding: 0 0 8px; }
       currentLoginState = state;
       if (state) pollLogin(state);
     }).catch(function (err) {
+      if (generation !== accountAddGeneration || currentLoginVendor !== vendor) return;
       status.textContent = "获取授权链接失败：" + err.message;
     });
   }
 
   function pollLogin(state) {
     stopLoginPolling();
+    var generation = accountAddGeneration;
+    var pollGeneration = loginPollGeneration;
     var status = document.getElementById("loginStatus");
     var attempts = 0;
+    var busy = false;
     loginTimer = setInterval(function () {
+      if (generation !== accountAddGeneration || pollGeneration !== loginPollGeneration || state !== currentLoginState || busy) return;
       attempts++;
       // 设备授权一般几十秒内完成；超过 5 分钟就放弃轮询。
       if (attempts > 150) {
@@ -3032,7 +3085,10 @@ details.fold > div { padding: 0 0 8px; }
         status.textContent = "授权超时，请重新发起登录。";
         return;
       }
+      busy = true;
       api("GET", hostPath("/get-auth-status?state=" + encodeURIComponent(state))).then(function (data) {
+        busy = false;
+        if (generation !== accountAddGeneration || pollGeneration !== loginPollGeneration || state !== currentLoginState) return;
         var value = (data && data.status) || "";
         if (value === "ok") {
           stopLoginPolling();
@@ -3051,6 +3107,8 @@ details.fold > div { padding: 0 0 8px; }
         }
         status.textContent = "等待授权中…（已等待 " + attempts * 2 + " 秒）";
       }).catch(function (err) {
+        busy = false;
+        if (generation !== accountAddGeneration || pollGeneration !== loginPollGeneration || state !== currentLoginState) return;
         stopLoginPolling();
         status.textContent = "轮询失败：" + err.message;
       });
@@ -3079,12 +3137,18 @@ details.fold > div { padding: 0 0 8px; }
     }
   });
   document.getElementById("btnLoginCancel").addEventListener("click", function () {
-    stopLoginPolling();
-    resetLoginCaptcha();
-    clearLoginVariants();
-    setLoginVariantBusy(false);
-    currentLoginState = "";
-    document.getElementById("loginBox").hidden = true;
+    resetAccountAddFlow();
+  });
+
+  document.getElementById("btnPasteCredential").addEventListener("click", function () {
+    if (currentLoginVendor) startCredentialPaste(currentLoginVendor);
+  });
+
+  document.getElementById("btnToggleCredentialMode").addEventListener("click", function () {
+    if (!currentApiKeyVendor || !supportsCredentialImport(currentApiKeyVendor) || currentApiKeyVendor.auth_mode !== "apikey") return;
+    var vendor = currentApiKeyVendor;
+    if (currentAccountInputMode === "credential_json") startAccountCredentialInput(vendor, "api_key");
+    else startCredentialPaste(vendor);
   });
 
   // submitLoginCallback 提交用户粘贴的 localhost 回调链接。
@@ -3112,7 +3176,9 @@ details.fold > div { padding: 0 0 8px; }
     btn.textContent = "提交中…";
     redirect.hidden = true;
     var submittedState = currentLoginState;
+    var generation = accountAddGeneration;
     api("POST", "/login/callback", { state: submittedState, url: raw }).then(function (data) {
+      if (generation !== accountAddGeneration || submittedState !== currentLoginState) return;
       btn.disabled = false;
       btn.textContent = "提交回调链接";
       var value = (data && data.status) || "";
@@ -3128,6 +3194,7 @@ details.fold > div { padding: 0 0 8px; }
         banner("ok", "账号添加成功，正在查询该账号额度…");
         loadQuotas(true);
         setTimeout(function () {
+          if (generation !== accountAddGeneration) return;
           var box = document.getElementById("loginBox");
           if (box) { box.hidden = true; box.style.display = "none"; }
         }, 1500);
@@ -3140,6 +3207,7 @@ details.fold > div { padding: 0 0 8px; }
         redirect.hidden = false;
       }
     }).catch(function (err) {
+      if (generation !== accountAddGeneration || submittedState !== currentLoginState) return;
       btn.disabled = false;
       btn.textContent = "提交回调链接";
       pasteStatus.textContent = "提交失败：" + (err.message || err);
@@ -3155,9 +3223,11 @@ details.fold > div { padding: 0 0 8px; }
     var btn = document.getElementById("btnSmsSend");
     if (!currentSmsVendor) { status.textContent = "请先重新打开添加面板。"; return; }
     if (!phone) { status.textContent = "请先填写手机号。"; return; }
+    var generation = accountAddGeneration;
     btn.disabled = true; btn.textContent = "发送中…";
     status.textContent = "正在发送验证码…";
     api("POST", "/login/sms/send", { vendor_id: currentSmsVendor.id, phone: phone }).then(function (data) {
+      if (generation !== accountAddGeneration) return;
       btn.disabled = false; btn.textContent = "发送验证码";
       if (data && data.ok) {
         smsSessionKey = (data.session_key || "");
@@ -3167,6 +3237,7 @@ details.fold > div { padding: 0 0 8px; }
         status.textContent = (data && data.message) || "发送失败，请稍后重试。";
       }
     }).catch(function (err) {
+      if (generation !== accountAddGeneration) return;
       btn.disabled = false; btn.textContent = "发送验证码";
       status.textContent = "发送失败：" + err.message;
     });
@@ -3180,32 +3251,32 @@ details.fold > div { padding: 0 0 8px; }
     var btn = document.getElementById("btnSmsVerify");
     if (!currentSmsVendor) { status.textContent = "请先重新打开添加面板。"; return; }
     if (!phone || !code) { status.textContent = "请填写手机号与短信验证码。"; return; }
+    var generation = accountAddGeneration;
     btn.disabled = true; btn.textContent = "登录中…";
     status.textContent = "正在验证并添加账号…";
     api("POST", "/login/sms/verify", { vendor_id: currentSmsVendor.id, session_key: smsSessionKey, phone: phone, code: code, label: label }).then(function (data) {
+      if (generation !== accountAddGeneration) return;
       btn.disabled = false; btn.textContent = "登录并添加";
       if (data && data.ok) {
-        document.getElementById("smsBox").hidden = true;
-        currentSmsVendor = null;
+        resetAccountAddFlow();
         banner("ok", (data.message || "账号添加成功") + "：" + (data.auth_id || ""));
         loadQuotas(true);
       } else {
         status.textContent = (data && data.message) || "登录失败，请检查验证码后重试。";
       }
     }).catch(function (err) {
+      if (generation !== accountAddGeneration) return;
       btn.disabled = false; btn.textContent = "登录并添加";
       status.textContent = "登录失败：" + err.message;
     });
   });
 
   document.getElementById("btnSmsCancel").addEventListener("click", function () {
-    document.getElementById("smsBox").hidden = true;
-    currentSmsVendor = null;
+    resetAccountAddFlow();
   });
 
   document.getElementById("btnCancelApiKey").addEventListener("click", function () {
-    document.getElementById("apiKeyBox").hidden = true;
-    currentApiKeyVendor = null;
+    resetAccountAddFlow();
   });
 
   document.getElementById("btnSubmitApiKey").addEventListener("click", function () {
@@ -3213,20 +3284,31 @@ details.fold > div { padding: 0 0 8px; }
     var apiKey = (document.getElementById("inputApiKey").value || "").trim();
     var label = (document.getElementById("inputApiLabel").value || "").trim();
     if (!apiKey) {
-      banner("err", "API Key 不能为空");
+      banner("err", currentAccountInputMode === "credential_json" ? "请先粘贴凭证 JSON" : "API Key 不能为空");
       return;
     }
+    var importing = currentAccountInputMode === "credential_json";
+    if (importing) {
+      var parsed;
+      try { parsed = JSON.parse(apiKey); }
+      catch (err) { banner("err", "凭证 JSON 格式无效，请检查后重试"); return; }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        banner("err", "凭证 JSON 必须是一个对象");
+        return;
+      }
+    }
+    var generation = accountAddGeneration;
     var btn = document.getElementById("btnSubmitApiKey");
     btn.disabled = true;
     btn.textContent = "保存中…";
     var payload = { vendor: currentApiKeyVendor.id, label: label };
-    if (currentApiKeyVendor.id === "autoclawglobal") {
-      // AutoClaw 国际版：输入框里是凭证 JSON（访问令牌/刷新令牌）。
+    if (importing) {
       payload.credential_json = apiKey;
     } else {
       payload.api_key = apiKey;
     }
     api("POST", "/accounts/add", payload).then(function (res) {
+      if (generation !== accountAddGeneration) return;
       btn.disabled = false;
       btn.textContent = "保存账号";
       if (!res || !res.ok) {
@@ -3234,10 +3316,10 @@ details.fold > div { padding: 0 0 8px; }
         return;
       }
       banner("ok", res.message || "账号添加成功");
-      document.getElementById("apiKeyBox").hidden = true;
-      currentApiKeyVendor = null;
+      resetAccountAddFlow();
       loadStatus(true).catch(function () { });
     }).catch(function (err) {
+      if (generation !== accountAddGeneration) return;
       btn.disabled = false;
       btn.textContent = "保存账号";
       banner("err", err.message || "保存失败");

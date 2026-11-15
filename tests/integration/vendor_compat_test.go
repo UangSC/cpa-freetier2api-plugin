@@ -11,7 +11,7 @@ import (
 	"freetier2api-plugin/internal/core"
 )
 
-// TestVendorRegistryCompatibility 锁定 15 个供应商实例的对外身份与顺序。
+// TestVendorRegistryCompatibility 锁定供应商实例的完整对外身份与顺序。
 func TestVendorRegistryCompatibility(t *testing.T) {
 	installFakeHost(t)
 	setupTestPlugin(t)
@@ -24,11 +24,13 @@ func TestVendorRegistryCompatibility(t *testing.T) {
 		{"autoclawglobal", "AutoClaw 国际版", "global"},
 		{"cline", "Cline", ""},
 		{"codearts", "CodeArts", "cn"},
+		{"codeartsweb", "CodeArts 网页版", "cn"},
 		{"minimaxcodecn", "MiniMax Code 国内版", "cn"},
 		{"minimaxcodeglobal", "MiniMax Code 国际版", "global"},
 		{"opencodezen", "OpenCode ZEN", ""},
 		{"qodercn", "Qoder 国内版", "cn"},
 		{"qoderglobal", "Qoder 国际版", "global"},
+		{"qwenwork", "千问办公", "cn"},
 		{"raccoon", "小浣熊", ""},
 		{"traecn", "Trae 国内版", "cn"},
 		{"traeglobal", "Trae 国际版", "global"},
@@ -76,6 +78,7 @@ func TestVendorCapabilities(t *testing.T) {
 		configure bool
 		console   bool
 		credits   bool
+		imported  bool // 支持导入已有登录凭证 JSON，与登录方式独立
 		authMode  string
 	}
 	cases := map[string]want{
@@ -83,11 +86,13 @@ func TestVendorCapabilities(t *testing.T) {
 		"autoclawglobal":    {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true, authMode: "oauth"},
 		"cline":             {credits: true, login: true, refresh: true, merge: true, configure: true, authMode: "oauth"},
 		"codearts":          {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
+		"codeartsweb":       {refresh: true, models: true, merge: true, imported: true, authMode: "cookie"},
 		"minimaxcodecn":     {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
 		"minimaxcodeglobal": {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
 		"opencodezen":       {credits: true, refresh: true, models: true, merge: true, configure: true, authMode: "apikey"},
 		"qodercn":           {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
 		"qoderglobal":       {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
+		"qwenwork":          {credits: true, login: true, refresh: true, models: true, merge: true, imported: true, authMode: "oauth"},
 		"raccoon":           {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
 		"traecn":            {credits: true, login: true, refresh: true, quota: true, checkin: true, tasks: true, merge: true, configure: true},
 		// tasks 是「接口能力」而不是「本区域有族」：国际版实现了 TaskCatalogProvider
@@ -113,6 +118,7 @@ func TestVendorCapabilities(t *testing.T) {
 		_, hasConfigure := core.As[core.Configurable](vendor)
 		_, hasConsole := core.As[core.ConsoleModelProvider](vendor)
 		_, hasCredits := core.As[core.CreditsProvider](vendor)
+		_, hasImport := core.As[core.CredentialImportProvider](vendor)
 		authMode := ""
 		if reporter, okReporter := core.As[core.AuthModeReporter](vendor); okReporter {
 			authMode = reporter.AuthMode()
@@ -120,7 +126,7 @@ func TestVendorCapabilities(t *testing.T) {
 		got := want{
 			login: hasLogin, refresh: hasRefresh, quota: hasQuota, checkin: hasCheckin,
 			tasks: hasTasks, models: hasModels, merge: hasMerge, configure: hasConfigure,
-			console: hasConsole, credits: hasCredits, authMode: authMode,
+			console: hasConsole, credits: hasCredits, imported: hasImport, authMode: authMode,
 		}
 		if got != expected {
 			t.Fatalf("vendor %s capabilities = %+v, want %+v", vendor.ID(), got, expected)

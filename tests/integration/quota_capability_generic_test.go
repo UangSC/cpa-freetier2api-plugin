@@ -48,7 +48,7 @@ func TestSupportsQuotaIsGenericAcrossVendors(t *testing.T) {
 		}
 	}
 	if len(withoutQuota) == 0 {
-		t.Fatal("expected at least one vendor without quota (cline, opencodezen); " +
+		t.Fatal("expected at least one vendor without quota (cline, opencodezen, codeartsweb, qwenwork); " +
 			"if all vendors now implement Quota, update this assertion")
 	}
 	if len(withQuota) == 0 {
@@ -59,7 +59,7 @@ func TestSupportsQuotaIsGenericAcrossVendors(t *testing.T) {
 	// 快照：把「谁没有额度接口」钉死。它不是实现细节，而是**用户可见行为**
 	// ——这些供应商的账号会立刻显示「-- / --」。新增/移除 Quota 实现时必须
 	// 同步更新这里，并确认页面语义仍然正确。
-	wantNoQuota := map[string]bool{"cline": true, "opencodezen": true}
+	wantNoQuota := map[string]bool{"cline": true, "opencodezen": true, "codeartsweb": true, "qwenwork": true}
 	if len(withoutQuota) != len(wantNoQuota) {
 		t.Fatalf("no-quota vendors = %v, want %v", withoutQuota, wantNoQuota)
 	}

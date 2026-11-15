@@ -540,10 +540,27 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 	if seed == "" {
 		seed = core.RandomHex(8)
 	}
-	fileName := core.FileNameFor(vendor.ID(), seed)
 	callbackID := hostbridge.RequestCallbackID(req)
 	ctx, cancel := hostbridge.ManagementContext(req, requestTimeout)
 	defer cancel()
+	if credentialJSON != "" {
+		if preparer, exists := core.As[core.CredentialImportPreparer](vendor); exists {
+			prepared, err := preparer.PrepareCredentialImport(ctx, rawJSON)
+			if err != nil {
+				return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			}
+			rawJSON = prepared
+			if label == "" {
+				var identity map[string]any
+				if json.Unmarshal(prepared, &identity) == nil {
+					if userID := core.GetString(identity, "user_id"); userID != "" {
+						seed = userID
+					}
+				}
+			}
+		}
+	}
+	fileName := core.FileNameFor(vendor.ID(), seed)
 	if errLimit := s.pool.CheckVendorLimit(ctx, callbackID, vendor, fileName); errLimit != nil {
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": errLimit.Error()})
 	}

@@ -90,6 +90,7 @@ func (a *App) handleExecutorExecute(request []byte) ([]byte, error) {
 	if errExecute != nil {
 		return nil, core.ToPluginError(errExecute)
 	}
+	a.syncCredentialStateAfterExecution(ctx, prepared)
 	return core.OKEnvelope(response)
 }
 
@@ -161,6 +162,9 @@ func (a *App) runStreamExecution(streamCtx context.Context, cancelStream context
 	if errForward != nil && streamCtx.Err() == nil {
 		closeStream(callbackID, streamID, errForward)
 		return
+	}
+	if errForward == nil && streamCtx.Err() == nil {
+		a.syncCredentialStateAfterExecution(ctx, prepared)
 	}
 	closeStream(callbackID, streamID, nil)
 }

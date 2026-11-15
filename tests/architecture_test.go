@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -201,9 +202,11 @@ var layerRules = []layerRule{
 	{pkg: "vendors/autoclaw", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/cline", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/codearts", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
+	{pkg: "vendors/codeartsweb", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/minimaxcode", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/opencodezen", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/qoder", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
+	{pkg: "vendors/qwenwork", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/raccoon", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/trae", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/workbuddy", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
@@ -353,11 +356,12 @@ var vendorRequiredFiles = []string{
 
 var vendorOptionalFiles = []string{
 	"tasks.go",
+	"http.go",
 }
 
 var vendorDirNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 
-var embedDirectivePattern = regexp.MustCompile(`(?m)^//go:embed[ \t]+([^\r\n]+)$`)
+var embedDirectivePattern = regexp.MustCompile(`(?m)^//go:embed[ \t]+([^\r\n]+)\r?$`)
 
 // TestVendorDirectoryLayout 守住 vendors 目录的封闭白名单。
 //
@@ -657,16 +661,9 @@ func vendorEmbedPatterns(t *testing.T, dir string) []string {
 
 func safeEmbedPattern(t *testing.T, dir, pattern string) bool {
 	t.Helper()
-	invalid := strings.HasPrefix(pattern, "/") || filepath.IsAbs(pattern)
-	if !invalid {
-		for _, segment := range strings.Split(filepath.ToSlash(pattern), "/") {
-			if segment == ".." {
-				invalid = true
-				break
-			}
-		}
-	}
-	if invalid {
+	glob, _ := strings.CutPrefix(pattern, "all:")
+	_, errMatch := path.Match(glob, "")
+	if glob == "." || !fs.ValidPath(glob) || errMatch != nil {
 		t.Errorf("%s：go:embed 路径必须是 vendor 目录内的相对路径：%q", dir, pattern)
 		return false
 	}
@@ -674,12 +671,67 @@ func safeEmbedPattern(t *testing.T, dir, pattern string) bool {
 }
 
 func embedPatternMatches(pattern, asset string) bool {
-	if matched, _ := path.Match(pattern, asset); matched {
+	// go:embed 的模式始终使用前斜杠与 path.Match，不能按当前系统改写模式。
+	// asset 已在文件遍历边界用 filepath.ToSlash 转为同一种路径表示。
+	glob, all := strings.CutPrefix(pattern, "all:")
+	if _, errMatch := path.Match(glob, ""); errMatch != nil || glob == "." || !fs.ValidPath(glob) {
+		return false
+	}
+	if matched, _ := path.Match(glob, asset); matched {
 		return true
 	}
-	// go:embed 也接受目录名；目录会递归包含其下所有文件。
-	prefix := strings.TrimSuffix(filepath.ToSlash(pattern), "/")
-	return prefix != "" && strings.HasPrefix(asset, prefix+"/")
+	// 模式命中的目录会递归包含其下文件，包括 assets/* 命中的子目录。
+	for directory := path.Dir(asset); directory != "." && directory != "/"; directory = path.Dir(directory) {
+		matched, _ := path.Match(glob, directory)
+		if !matched {
+			continue
+		}
+		if all {
+			return true
+		}
+		for _, segment := range strings.Split(strings.TrimPrefix(asset, directory+"/"), "/") {
+			if strings.HasPrefix(segment, ".") || strings.HasPrefix(segment, "_") {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func TestVendorEmbedPatternsUsePortablePaths(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, asset string
+		want           bool
+	}{
+		{"assets/config.json", "assets/config.json", true},
+		{"assets/config.json", "assets/unreferenced.json", false},
+		{"assets/*.json", "assets/config.json", true},
+		{"assets/*.json", "assets/docs/unreferenced.txt", false},
+		{"assets", "assets/docs/reference.json", true},
+		{"assets", "assets-other/unreferenced.json", false},
+		{"assets/*", "assets/docs/reference.json", true},
+		{"assets", "assets/docs/_hidden.json", false},
+		{"assets", "assets/.hidden/reference.json", false},
+		{"all:assets", "assets/.hidden/_reference.json", true},
+		{"assets/*", "assets/_explicit.json", true},
+		{`assets\config.json`, "assets/config.json", false},
+		{"../assets/*", "assets/config.json", false},
+		{"assets/[", "assets/config.json", false},
+	} {
+		t.Run(tc.pattern+"-"+tc.asset, func(t *testing.T) {
+			if got := embedPatternMatches(tc.pattern, tc.asset); got != tc.want {
+				t.Fatalf("embedPatternMatches(%q, %q) = %v, want %v", tc.pattern, tc.asset, got, tc.want)
+			}
+		})
+	}
+	for _, lineEnding := range []string{"\n", "\r\n"} {
+		source := "package example" + lineEnding + "//go:embed assets/config.json" + lineEnding
+		matches := embedDirectivePattern.FindAllStringSubmatch(source, -1)
+		if len(matches) != 1 || matches[0][1] != "assets/config.json" {
+			t.Fatalf("go:embed 必须兼容 LF 与 CRLF 换行，解析结果 %v", matches)
+		}
+	}
 }
 
 func sameStringSet(got, want []string) bool {

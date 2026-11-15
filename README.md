@@ -16,7 +16,7 @@
 ## 功能特性
 
 - 复用宿主 Anthropic `/v1/messages`、OpenAI `/v1/chat/completions` 与 OpenAI `/v1/responses` 接口，无需额外部署独立网关
-- 支持 8 大体系共 16 个国内外免费额度供应商实例（含 AutoClaw 国内/国际与小浣熊），凭证严格按供应商隔离（单供应商上限 10 个账号）
+- 支持 18 个国内外额度供应商实例（含千问办公、CodeArts 网页版、AutoClaw 国内/国际与小浣熊），凭证严格按供应商隔离（单供应商上限 10 个账号）
 - 模型清单动态探测、自定义模型别名与跨供应商同名模型自动负载均衡/故障转移；默认采用上游官方裸名，无强制渠道前缀
 - 内嵌单页 Web 控制台：支持 OAuth 设备授权 / loopback 自动收码 / 本地回调粘贴 / API Key 添加账号、账号自定义别名、账号批量启停/删除、额度可视化、签到历史回溯、模型启停与运行日志
 - 任务编排与闭环：支持每日自动签到、各渠道活动任务表驱动一键完成、后台排队执行与状态轮询
@@ -33,6 +33,7 @@
 | `autoclawglobal` | AutoClaw 国际版 | `global` | API Key | `autoclawglobal-*.json` |
 | `qodercn` | Qoder 国内版 | `cn` | OAuth 设备授权 | `qodercn-*.json` |
 | `qoderglobal` | Qoder 国际版 | `global` | OAuth 设备授权 | `qoderglobal-*.json` |
+| `qwenwork` | 千问办公 | `cn` | 网页设备授权 / 凭证 JSON 导入 | `qwenwork-*.json` |
 | `raccoon` | 小浣熊 | — | OAuth（loopback 自动收码 / 深链） | `raccoon-*.json` |
 | `opencodezen` | OpenCode ZEN | `global` | API Key | `opencodezen-*.json` |
 | `cline` | Cline | `global` | WorkOS 设备授权 | `cline-*.json` |
@@ -41,6 +42,7 @@
 | `traecn` | Trae 国内版 | `cn` | OAuth 授权 | `traecn-*.json` |
 | `traeglobal` | Trae 国际版 | `global` | OAuth 授权 | `traeglobal-*.json` |
 | `codearts` | CodeArts | `cn` | OAuth 授权 / STS | `codearts-*.json` |
+| `codeartsweb` | CodeArts 网页版 | `cn` | 网页会话 JSON 导入 | `codeartsweb-*.json` |
 | `minimaxcodecn` | MiniMax Code 国内版 | `cn` | OAuth 设备授权 | `minimaxcodecn-*.json` |
 | `minimaxcodeglobal` | MiniMax Code 国际版 | `global` | OAuth 设备授权 | `minimaxcodeglobal-*.json` |
 
@@ -99,7 +101,13 @@ http://<CPA地址>:8317/v0/resource/plugins/freetier2api/console
 
 ### 2. 调用 API
 
-账号添加后即可通过 CLIProxyAPI 标准接口调用（支持裸模型名或 `<vendor>:<model>` 前缀指定供应商）：
+账号添加后即可通过 CLIProxyAPI 标准接口调用，使用 `/v1/models` 已登记的裸模型名或 `<账号前缀>/<模型>`。账号前缀由凭证的 `prefix` 设置；请使用实际登记值，不要自行拼接供应商冒号前缀。
+
+千问办公在「添加账号」中选择对应入口，在官方网页选择本人企业或个人身份并完成授权，插件会自动轮询、校验身份并保存凭证。也可使用「粘贴凭证」导入本插件的凭证 JSON 或经本人授权解密导出的桌面 `auth-v2` JSON；不能直接粘贴加密的 `.dat` 文件。企业凭证保存和续期均核对用户、企业及团队，不会自动切换成个人身份。
+
+千问办公使用与官方 SDK 相同的原始 HTTP/SSE 推理协议，正式插件只依赖 Go 标准库。客户端系统消息、工具声明及对话历史按原协议转发，不附加桌面 SDK 的品牌或日期提示。模型目录和计费倍率从上游读取；上下文采用目录中最大的可用档位，未提供时不会补出一个 1M。
+
+部分千问思考模型不提供关闭思考的档位；这类模型收到 `enable_thinking: false` 或 `reasoning_effort: "none"` 时会明确返回 400。`max_tokens` 包含思考开销，过低可能只产生思考分片并以 `length` 结束。短文本测试可使用 `Qwen4-Max-Preview` 和足够的输出预算，例如 512。
 
 ```bash
 # OpenAI Chat Completions
@@ -164,6 +172,18 @@ Qoder 模型默认采用上游 `context_config` 中最大的可用窗口，例�
 
 ## 项目架构
 
+### CodeArts 网页通道
+
+`CodeArts 网页版` 使用华为云北京四区域网页登录会话，与原 CodeArts 的 AK/SK 签名通道分别管理。添加账号时选择网页通道，粘贴包含 `cookie`、`cftk` 和 `headers` 的凭证 JSON；`headers` 可保存浏览器的 `User-Agent`、`Accept-Language` 和 `sec-ch-ua` 系列头。也支持包含 `curl` 字段的 JSON，工具只解析原站请求，不执行命令。
+
+保存前会向原站验证账号身份，并默认添加 `prefix: codeartsweb`。客户端调用示例模型为 `codeartsweb/deepseek-v4.1-flash-1017`。模型目录直接读取原站 `model_parameters`，分别保留总上下文、输入和输出上限。会话 Cookie 过期后需要重新导入。
+
+支持文本、思考流、usage 和完整角色历史。每次请求建立独立云会话，将客户端历史按角色明确传入，避免多个客户端串用云端历史。网页平台自带智能体上下文，也会计入额度。客户端函数工具、图像及网页未提供的采样参数会明确返回不支持。
+
+`max_tokens` / `max_completion_tokens` 由代理按正文和思考的 UTF-8 字节数执行保守限长；达到限制后停止云任务，返回 `finish_reason: length`。这不是原站精确的 Token 预算，可能提前停止。正常结束必须收到原站 `done`；错误或意外断流不会自动重新提交 prompt。
+
+网页流使用 CPA 的流式 HTTP 桥；原站 Cookie、`cftk`、来源头和浏览器客户端头会保留，CPA 客户端的认证头不会转发到华为云。
+
 ```text
 package main / cgo        C ABI 入口（main.go / cgo.go）
   └─ internal/app         组合根与 ABI 适配（生命周期、RPC 分发、五类能力）
@@ -178,6 +198,7 @@ package main / cgo        C ABI 入口（main.go / cgo.go）
        │    ├─ errors.go            [必备] 上游错误分类与可重试判定
        │    ├─ login.go             [必备] AuthMode + 登录流程 + 续期（只能有一个）
        │    ├─ tasks.go             [可选] 额度/签到/套餐领取/任务/每日奖励/账号资料
+       │    ├─ http.go              [可选] 供应商网页 HTTP 客户端与浏览器头快照
        │    ├─ *_test.go            [按需] 与源码同目录；实况测试用 *_live_test.go
        │    └─ assets/              [按需] go:embed 的内嵌资源
        └─ internal/core            供应商无关契约（Vendor、能力接口、注册表、凭证、错误分类）

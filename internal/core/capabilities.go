@@ -60,6 +60,18 @@ type LoginProvider interface {
 	LoginPoll(ctx context.Context, state string) (*pluginapi.AuthLoginPollResponse, error)
 }
 
+// CredentialImportProvider 由支持粘贴已有登录凭证 JSON 的供应商实现。
+//
+// 这是独立于登录方式的可选能力：支持导入不表示 API Key 输入应按 JSON 处理。
+type CredentialImportProvider interface {
+	CredentialImportHint() string
+}
+
+// CredentialImportPreparer 允许供应商在保存导入凭证前校验身份并归一化字段。
+type CredentialImportPreparer interface {
+	PrepareCredentialImport(ctx context.Context, raw []byte) ([]byte, error)
+}
+
 // LoginSessionOwner 由「会话表自持、不登记到公共 LoginSessions」的供应商实现。
 //
 // 根层按 state 路由登录请求时先查公共登记表；查不到就逐个问供应商「这个会话
@@ -500,4 +512,11 @@ type ActivityProbeResult struct {
 // 实现可以在探测前执行必要的无副作用资格同步（例如日活事件），但不得领取。
 type ActivityProbe interface {
 	ProbeActivity(ctx context.Context, cred *Credential) (ActivityProbeResult, error)
+}
+
+// CredentialStateObserver 由执行期间可能轮换凭证状态的供应商实现。
+// 只在模型执行成功后同步；通知携带实际保存的 JSON，避免把后续轮换误当成已保存。
+type CredentialStateObserver interface {
+	HasPendingCredentialState(cred *Credential) bool
+	CredentialStatePersisted(cred *Credential, persistedJSON []byte)
 }
