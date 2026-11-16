@@ -143,6 +143,25 @@ Configure under `plugins.configs.freetier2api` in `config.yaml` (runtime setting
 | `state_dir` | string | `~/.freetier2api-plugin` | State and cache directory |
 | `log_level` | string | `info` | Log level: `debug` / `info` / `error` |
 
+### Native CodeArts credit inference with DSH
+
+For native function tools in DeepSeek Harness (DSH), use a `codearts` OAuth / STS account and explicitly enable credit-billed inference:
+
+```yaml
+plugins:
+  configs:
+    freetier2api:
+      codearts_credit_enabled: true
+```
+
+Save and reload the host configuration, then refresh the model catalog. Requests consume Huawei account credits. The default remains `false`; failed benefit requests do not automatically switch to credit billing.
+
+To keep the client model ID `deepseek-v4.1-flash`, assign that alias to `codearts:deepseek-v4.1-flash-1017` and enable it in the model console. Check other providers sharing the alias so requests use the intended channel. Configure DSH with the host's OpenAI-compatible `/v1` URL and the saved model alias.
+
+On 2026-11-16, tests with the same account and `1017` model returned `InferHub.APIG.0101.404` on the benefit channel (`maas_type: benefit`), while credit inference worked with the existing plugin headers. Non-streaming, streaming, automatic function selection (`tool_choice: auto`), tool-result continuation, and an API request using the DSH configuration and key passed. These were short requests; full-context and image inputs were not tested.
+
+The tested account returned `TM.00001041` at three concurrent sessions, which can trigger temporary host cooldown. Reduce concurrency and retry after cooldown. An explicitly selected function object failed upstream parameter validation; automatic tool selection was verified.
+
 ## Project Architecture
 
 ```text

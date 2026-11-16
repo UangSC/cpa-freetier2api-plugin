@@ -170,6 +170,25 @@ Qoder 模型默认采用上游 `context_config` 中最大的可用窗口，例�
 | `host_log_file` | string | 空 | 宿主日志文件路径（留空自动探测 `<auth-dir>/logs/main.log` 或 `<logs>/main.log`） |
 | `host_log_level` | string | `info` | 镜像至宿主日志的过滤级别：`debug` / `info` / `error` |
 
+### CodeArts 原生积分通道与 DSH
+
+在 DeepSeek Harness（DSH）等客户端中使用 CodeArts 原生函数工具时，选择 `codearts` 的 OAuth / STS 账号，并明确开启积分推理：
+
+```yaml
+plugins:
+  configs:
+    freetier2api:
+      codearts_credit_enabled: true
+```
+
+保存并重新载入宿主配置，再刷新模型目录。此设置消耗华为账号积分；默认值仍为 `false`，免费福利请求失败时不会自动转为积分请求。
+
+若客户端沿用 `deepseek-v4.1-flash`，可在模型控制台给 `codearts:deepseek-v4.1-flash-1017` 设置该别名并启用。检查同一别名下其他供应商的启用状态，确保请求使用目标通道。DSH 的 OpenAI 兼容服务地址填写宿主的 `/v1` 地址，模型 ID 填写保存后的别名。
+
+2026-11-16 的同账号、同 `1017` 模型实测中，免费福利通道（`maas_type: benefit`）返回 `InferHub.APIG.0101.404`，积分通道正常；现有插件请求头可以完成原生调用。非流式、流式、`tool_choice: auto` 的函数调用及工具结果回传均通过，使用 DSH 配置和密钥的 API 请求也成功。这是短请求验证，未做满上下文或图片验收。
+
+该测试账号达到三个并发会话时返回 `TM.00001041`，可能触发宿主临时冷却；降低并发并等待冷却后可重试。测试中的指定函数对象被上游参数校验拒绝，自动工具选择已验证可用。
+
 ## 项目架构
 
 ### CodeArts 网页通道
