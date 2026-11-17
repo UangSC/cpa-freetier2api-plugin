@@ -18,8 +18,9 @@ type vendorDescriptor struct {
 	CredentialImport bool `json:"credential_import"`
 	// CredentialImportHint 是供应商给用户的凭证获取和导入说明。
 	CredentialImportHint string `json:"credential_import_hint,omitempty"`
-	// CredentialCurlImport 报告该供应商支持直接粘贴 cURL (bash)。
-	CredentialCurlImport bool `json:"credential_curl_import,omitempty"`
+	// QuotaCredentialHint 为账号授权表单提供可选的余额绑定说明。
+	QuotaCredentialHint string `json:"quota_credential_hint,omitempty"`
+	QuotaAuthorization  bool   `json:"quota_authorization,omitempty"`
 	// SMSLogin 报告该供应商支持「手机号 + 短信验证码」两步登录表单。
 	SMSLogin bool `json:"sms_login"`
 	// PasteCallback 报告该供应商的登录是否需要（也支持）「粘贴 localhost 回调链接」兜底。
@@ -54,8 +55,11 @@ func (s *Service) buildVendorsPayload() map[string]any {
 			descriptor.CredentialImport = true
 			descriptor.CredentialImportHint = strings.TrimSpace(importer.CredentialImportHint())
 		}
-		if _, okCurl := core.As[core.CredentialCurlImportPreparer](vendor); okCurl {
-			descriptor.CredentialCurlImport = true
+		if provider, ok := core.As[core.QuotaCredentialProvider](vendor); ok {
+			descriptor.QuotaCredentialHint = strings.TrimSpace(provider.QuotaCredentialHint())
+		}
+		if _, ok := core.As[core.QuotaAuthorizationProvider](vendor); ok {
+			descriptor.QuotaAuthorization = true
 		}
 		if submitter, okSubmit := core.As[core.CallbackSubmitter](vendor); okSubmit {
 			descriptor.PasteCallback = true

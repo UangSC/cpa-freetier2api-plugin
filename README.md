@@ -16,7 +16,7 @@
 ## 功能特性
 
 - 复用宿主 Anthropic `/v1/messages`、OpenAI `/v1/chat/completions` 与 OpenAI `/v1/responses` 接口，无需额外部署独立网关
-- 支持 19 个国内外额度供应商实例（含书生 Token Plan、千问办公、CodeArts 网页版、AutoClaw 国内/国际与小浣熊），凭证严格按供应商隔离（单供应商上限 10 个账号）
+- 支持 18 个国内外额度供应商实例（含书生 Token Plan、千问办公、AutoClaw 国内/国际与小浣熊），凭证严格按供应商隔离（单供应商上限 10 个账号）
 - 模型清单动态探测、自定义模型别名与跨供应商同名模型自动负载均衡/故障转移；默认采用上游官方裸名，无强制渠道前缀
 - 内嵌单页 Web 控制台：支持 OAuth 设备授权 / loopback 自动收码 / 本地回调粘贴 / API Key 添加账号、账号自定义别名、账号批量启停/删除、额度可视化、签到历史回溯、模型启停与运行日志
 - 任务编排与闭环：支持每日自动签到、各渠道活动任务表驱动一键完成、后台排队执行与状态轮询
@@ -42,7 +42,6 @@
 | `traecn` | Trae 国内版 | `cn` | OAuth 授权 | `traecn-*.json` |
 | `traeglobal` | Trae 国际版 | `global` | OAuth 授权 | `traeglobal-*.json` |
 | `codearts` | CodeArts | `cn` | OAuth 授权 / STS | `codearts-*.json` |
-| `codeartsweb` | CodeArts 网页版 | `cn` | cURL (bash) / 网页会话 JSON 导入 | `codeartsweb-*.json` |
 | `tokenplan` | 书生 Token Plan | `cn` | Token Plan 完整 API Key | `tokenplan-*.json` |
 | `minimaxcodecn` | MiniMax Code 国内版 | `cn` | OAuth 设备授权 | `minimaxcodecn-*.json` |
 | `minimaxcodeglobal` | MiniMax Code 国际版 | `global` | OAuth 设备授权 | `minimaxcodeglobal-*.json` |
@@ -102,7 +101,7 @@ Token Plan 的 11 个可见模型已固定在插件内：Agents-A1、intern-s2�
 
 Token Plan 按账号管理：每个账号提供一个 Key、对应一个插件凭证；不同账号独立。重复添加同一 Key 更新原凭证，不同 Key 不会因为备注同名而相互覆盖。
 
-“我的墨点”是账号可选绑定，无任务、签到或套餐领取。未绑定时不查询，也不使用其他账号的授权。点击该账号的“绑定墨点”，打开授权地址网页登录，复制登录后的完整回调地址粘贴回插件即可；cURL 仅为兜底。墨点网页授权与该账号的 Key 保存于同一份插件凭证，网页授权失效时可重新绑定，模型 Key 不受影响。只修改插件及其凭证，不修改 CPA 核心；余额保留三位小数。
+添加书生 Token Plan 时，在同一个“完成授权”窗口填写完整模型 Key、生成网页授权地址，并粘贴登录后的回调网址或余额请求 cURL。点击“完成授权”后，将 Key 和墨点授权一同保存到该账号的凭证；生成地址和取消操作不会创建账号。墨点授权可选，留空时只保存模型 Key。已有账号通过“绑定墨点”或“重新绑定墨点”打开同一窗口，无需重复填写 Key。余额保留三位小数，网页授权失效时可重新绑定，模型 Key 不受影响。
 
 OpenXLab 正式站限制回调域名，插件使用已允许的官网 HTTPS 回调页面，在 URL 片段内接收一次性授权码，避免被官网页面自动消费；状态码与所选 Key 绑定并限时有效。其他账号需要分别授权，不批量绑定，也不共用钱包。
 
@@ -209,26 +208,6 @@ plugins:
 该测试账号达到三个并发会话时返回 `TM.00001041`，可能触发宿主临时冷却；降低并发并等待冷却后可重试。测试中的指定函数对象被上游参数校验拒绝，自动工具选择已验证可用。
 
 ## 项目架构
-
-### CodeArts 网页通道
-
-`CodeArts 网页版` 使用华为云北京四区域网页登录会话，与原 CodeArts 的 AK/SK 签名通道分别管理。添加账号时选择网页通道，可直接粘贴整段多行 **cURL (bash)**，无需手动转换成 JSON：登录[码道网页](https://devcloud.cn-north-4.huaweicloud.com/chat/home)，按 F12 打开 Network，打开模型菜单，找到 `agents/detail` 请求，右键选择 **Copy → Copy as cURL (bash)**，回到插件粘贴并保存。
-
-插件只解析 cURL 文本，不执行命令，也不重放其中的 URL、请求体或聊天内容。它提取 Cookie、`cftk`、`User-Agent`、`Accept-Language` 和 `sec-ch-ua` 系列头，然后单独通过 `GET /chat/rest/me` 校验账号身份，再自动生成并保存凭证 JSON。该身份校验不调用模型。管理 API 的 `/accounts/add` 也接受原始文本字段 `credential_curl`，仅适用于声明该导入能力的供应商。
-
-仍兼容包含 `cookie`、`cftk` 和 `headers` 的网页凭证 JSON，以及包含 `curl` 字段的 JSON。不要导入 `agents/detail` 的模型响应 JSON 或原 `codearts-*.json` 的 AK/SK 凭证。当前 Web 通道采用会话导入；原 CodeArts 的 OAuth 回调不产出网页 Cookie，原站用于 AtomGit 绑定的 OAuth 回调也不能用于网页登录。
-
-保存前会向原站验证账号身份，并默认添加 `prefix: codeartsweb`。客户端调用示例模型为 `codeartsweb/deepseek-v4.1-flash-1017`。模型目录直接读取原站 `model_parameters`，分别保留总上下文、输入和输出上限。会话 Cookie 过期后需要重新导入。
-
-支持文本、思考流、usage、完整角色历史和客户端函数文本桥接。每次客户端请求建立独立云会话，将历史按角色明确传入；同次请求的工具定义协商复用该云会话。网页平台自带智能体上下文，也会计入额度。图像及网页未提供的采样参数会明确返回不支持。
-
-DSH 可使用 `codeartsweb/deepseek-v4.1-flash-1017`。`reasoning_effort: off` 映射为官网的 `none`；官网支持 none、low、medium、high、xhigh、max，minimal 映射为 low。函数桥接支持 tools / functions、自动或指定工具、required、parallel_tool_calls 及历史工具结果。工具定义超过 64 KiB 时先提供名称和选择摘要，需要工具时在同一云会话补充所选工具的完整定义；不截断实际参数 Schema，usage 累计两轮实际用量。简单聊天只请求一轮。
-
-客户端函数通过本次随机定界协议转换成标准 tool_calls；只接受已提供的工具名、完整 JSON 对象和符合调用选择的结果。工具参数的完整 Schema 校验和执行由客户端负责，官网自己的云端工具事件不会转成客户端工具。此桥接依赖模型遵循文本指令，能力与官网原生函数接口存在差异。
-
-`max_tokens` / `max_completion_tokens` 由代理按正文和思考的 UTF-8 字节数执行保守限长；达到限制后停止云任务，返回 `finish_reason: length`。这不是原站精确的 Token 预算，可能提前停止。正常结束必须收到原站 `done` 且有正文或完整工具调用；零 token 空完成会明确报错。错误或意外断流不会自动重新提交 prompt。
-
-网页流使用 CPA 的流式 HTTP 桥；原站 Cookie、`cftk`、来源头和浏览器客户端头会保留，CPA 客户端的认证头不会转发到华为云。
 
 ```text
 package main / cgo        C ABI 入口（main.go / cgo.go）

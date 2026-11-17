@@ -489,8 +489,8 @@ type accountAddRequest struct {
 	// CredentialJSON 是供应商原生凭证 JSON（token 对等复杂凭证）。
 	// 提供时优先于 api_key：原样交给供应商的 Parse 归一，不套 api_key 信封。
 	CredentialJSON string `json:"credential_json,omitempty"`
-	// CredentialCurl 是浏览器 Copy as cURL (bash) 的原始文本，由供应商解析。
-	CredentialCurl string `json:"credential_curl,omitempty"`
+	// QuotaCredential 是与当前 Key 一同提交的可选余额回调或 cURL。
+	QuotaCredential string `json:"quota_credential,omitempty"`
 }
 
 func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
@@ -505,32 +505,17 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "vendor 不能为空"})
 	}
 	credentialJSON := strings.TrimSpace(body.CredentialJSON)
-	credentialCurl := strings.TrimSpace(body.CredentialCurl)
-	if apiKey == "" && credentialJSON == "" && credentialCurl == "" {
+	quotaCredential := strings.TrimSpace(body.QuotaCredential)
+	if apiKey == "" && credentialJSON == "" {
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "api_key 不能为空"})
 	}
 	vendor, okVendor := s.registry.ByID(vendorID)
 	if !okVendor {
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": fmt.Sprintf("未知供应商 %q", vendorID)})
 	}
-	var curlPreparer core.CredentialCurlImportPreparer
-	if credentialCurl != "" {
-		if credentialJSON != "" || apiKey != "" {
-			return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "请只提供一种凭证输入"})
-		}
-		var supportsCurl bool
-		curlPreparer, supportsCurl = core.As[core.CredentialCurlImportPreparer](vendor)
-		if !supportsCurl {
-			return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "该供应商不支持 cURL 凭证导入"})
-		}
-	}
 	var rawJSON []byte
 	seed := label
-	if credentialCurl != "" {
-		if seed == "" {
-			seed = core.RandomHex(8)
-		}
-	} else if credentialJSON != "" {
+	if credentialJSON != "" {
 		// 原生凭证 JSON：补 vendor 归属字段后原样落盘，交给供应商 Parse 归一。
 		var doc map[string]any
 		if err := json.Unmarshal([]byte(credentialJSON), &doc); err != nil || doc == nil {
@@ -569,16 +554,10 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 	callbackID := hostbridge.RequestCallbackID(req)
 	ctx, cancel := hostbridge.ManagementContext(req, requestTimeout)
 	defer cancel()
-	if credentialJSON != "" || credentialCurl != "" {
+	if credentialJSON != "" {
 		preparer, exists := core.As[core.CredentialImportPreparer](vendor)
-		if exists || curlPreparer != nil {
-			var prepared []byte
-			var err error
-			if curlPreparer != nil {
-				prepared, err = curlPreparer.PrepareCredentialCurlImport(ctx, credentialCurl)
-			} else {
-				prepared, err = preparer.PrepareCredentialImport(ctx, rawJSON)
-			}
+		if exists {
+			prepared, err := preparer.PrepareCredentialImport(ctx, rawJSON)
 			if err != nil {
 				return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			}
@@ -614,6 +593,23 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 					rawJSON, _ = json.MarshalIndent(old, "", "  ")
 				}
 				break
+			}
+		}
+	}
+	// 余额授权校验成功后才保存，避免留下只有 Key 的半完成账号。
+	provider, supportsQuotaCredential := core.As[core.QuotaCredentialProvider](vendor)
+	if quotaCredential != "" && !supportsQuotaCredential {
+		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "该供应商不支持余额授权"})
+	}
+	if supportsQuotaCredential {
+		credential, err := vendor.Parse(rawJSON, fileName)
+		if err != nil {
+			return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		}
+		if quotaCredential != "" {
+			rawJSON, err = provider.PrepareQuotaCredential(ctx, credential, quotaCredential)
+			if err != nil {
+				return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			}
 		}
 	}

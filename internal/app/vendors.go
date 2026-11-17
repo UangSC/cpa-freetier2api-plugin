@@ -7,7 +7,6 @@ import (
 	"freetier2api-plugin/internal/vendors/autoclaw"
 	"freetier2api-plugin/internal/vendors/cline"
 	"freetier2api-plugin/internal/vendors/codearts"
-	"freetier2api-plugin/internal/vendors/codeartsweb"
 	"freetier2api-plugin/internal/vendors/minimaxcode"
 	"freetier2api-plugin/internal/vendors/opencodezen"
 	"freetier2api-plugin/internal/vendors/qoder"
@@ -25,7 +24,6 @@ func BuiltinFactories() []core.VendorFactory {
 		{Instances: autoclaw.Instances},
 		{Instances: func(env core.Env) []core.Vendor { return cline.Instances(env) }},
 		{Instances: codearts.Instances},
-		{Instances: codeartsweb.Instances},
 		{Instances: minimaxcode.Instances},
 		{Instances: func(env core.Env) []core.Vendor { return opencodezen.Instances(env) }},
 		{Instances: qoder.Instances},

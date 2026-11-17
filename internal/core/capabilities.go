@@ -72,12 +72,6 @@ type CredentialImportPreparer interface {
 	PrepareCredentialImport(ctx context.Context, raw []byte) ([]byte, error)
 }
 
-// CredentialCurlImportPreparer 由支持直接导入浏览器 cURL 快照的供应商实现。
-// 实现方只解析文本，并在保存前完成凭证归一化和身份校验。
-type CredentialCurlImportPreparer interface {
-	PrepareCredentialCurlImport(ctx context.Context, text string) ([]byte, error)
-}
-
 // LoginSessionOwner 由「会话表自持、不登记到公共 LoginSessions」的供应商实现。
 //
 // 根层按 state 路由登录请求时先查公共登记表；查不到就逐个问供应商「这个会话

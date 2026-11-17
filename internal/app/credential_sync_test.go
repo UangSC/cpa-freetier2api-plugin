@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -318,100 +317,6 @@ func TestSuccessfulExecutionsSyncBeforeStreamCloseAndDoNotFailOnSaveError(t *tes
 		host.mu.Unlock()
 		if saves != 1 {
 			t.Fatalf("成功执行未触发同步：stream=%t saves=%d", stream, saves)
-		}
-	}
-}
-
-func TestWebObserverAcknowledgesOnlySavedCookieAndMatchingIdentity(t *testing.T) {
-	a, err := New(Options{Factories: BuiltinFactories()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	vendor, exists := a.registry.ByID("codeartsweb")
-	if !exists {
-		t.Fatal("网页供应商未注册")
-	}
-	observer := vendor.(core.CredentialStateObserver)
-	models := vendor.(core.ModelsProvider)
-	name := "codeartsweb-sync-account.json"
-	latest := []byte(`{"type":"freetier","vendor":"codeartsweb","cookie":"sid=old; webcftk=old-csrf","cftk":"old-csrf","user_id":"same-user","user_name":"Test User","prefix":"custom","disabled":false}`)
-	credential, err := vendor.Parse(latest, name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stage := "saved"
-	var savedJSON []byte
-	ctx := hostbridge.WithCallbackID(context.Background(), "sync-callback")
-	hostbridge.Configure(func(callbackID, method string, payload any) (json.RawMessage, error) {
-		if callbackID != "sync-callback" {
-			return nil, errors.New("lost callback scope")
-		}
-		switch method {
-		case pluginabi.MethodHostHTTPDo:
-			var request struct{ URL string }
-			encoded, _ := json.Marshal(payload)
-			_ = json.Unmarshal(encoded, &request)
-			body := []byte(`{"userId":"same-user","userName":"Test User"}`)
-			if strings.Contains(request.URL, "agents/detail") {
-				body = []byte(`{"gpts":{"models":[{"model_name":"test-model","model_parameters":{"model_id":"test-model","context_window":100000,"input_length":99600,"max_tokens":1000}}]}}`)
-			}
-			return json.Marshal(map[string]any{"StatusCode": 200, "Headers": http.Header{"Content-Type": {"application/json"}, "Set-Cookie": {"sid=" + stage, "webcftk=" + stage + "-csrf"}}, "Body": body})
-		case pluginabi.MethodHostAuthList:
-			return json.Marshal([]core.HostAuth{{Name: name, ID: name, AuthIndex: "web-sync-index", Provider: core.ProviderKey}})
-		case pluginabi.MethodHostAuthGet:
-			return json.Marshal(pluginapi.HostAuthGetResponse{Name: name, AuthIndex: "web-sync-index", JSON: latest})
-		case pluginabi.MethodHostAuthSave:
-			var request pluginapi.HostAuthSaveRequest
-			encoded, _ := json.Marshal(payload)
-			_ = json.Unmarshal(encoded, &request)
-			if request.Name != name {
-				return nil, errors.New("wrong save target")
-			}
-			savedJSON = append([]byte(nil), request.JSON...)
-			latest = append([]byte(nil), request.JSON...)
-			// 已保存 B，但并发元数据响应又轮换到 C，通知必须只确认 B。
-			stage = "later"
-			if _, err := models.ModelsForAuth(ctx, credential); err != nil {
-				return nil, err
-			}
-			return json.RawMessage(`{}`), nil
-		default:
-			return nil, errors.New("unexpected callback")
-		}
-	})
-	t.Cleanup(func() { hostbridge.Configure(nil) })
-	if _, err := models.ModelsForAuth(ctx, credential); err != nil {
-		t.Fatal(err)
-	}
-	if !observer.HasPendingCredentialState(credential) {
-		t.Fatal("元数据响应轮换后必须报告 pending")
-	}
-	prepared := preparedExecution{vendor: vendor, credential: credential}
-	prepared.rpc.AuthID = name
-	prepared.rpc.HostCallbackID = "sync-callback"
-	a.syncCredentialStateAfterExecution(ctx, prepared)
-	savedCredential, err := vendor.Parse(savedJSON, name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if credential.TokenValue() != savedCredential.TokenValue() || !observer.HasPendingCredentialState(credential) {
-		t.Fatal("保存期间的 C 轮换被错误推进为已保存")
-	}
-	oldFingerprint := credential.TokenValue()
-	for _, change := range []string{"identity", "vendor"} {
-		var fields map[string]any
-		_ = json.Unmarshal(savedJSON, &fields)
-		fields["cookie"] = "sid=later; webcftk=later-csrf"
-		fields["cftk"] = "later-csrf"
-		if change == "identity" {
-			fields["user_id"] = "other-user"
-		} else {
-			fields["vendor"] = "codearts"
-		}
-		wrongJSON, _ := json.Marshal(fields)
-		observer.CredentialStatePersisted(credential, wrongJSON)
-		if credential.TokenValue() != oldFingerprint {
-			t.Fatal("保存确认的归属/身份错误仍推进了指纹")
 		}
 	}
 }

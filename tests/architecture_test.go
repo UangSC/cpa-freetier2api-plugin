@@ -202,7 +202,6 @@ var layerRules = []layerRule{
 	{pkg: "vendors/autoclaw", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/cline", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/codearts", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
-	{pkg: "vendors/codeartsweb", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/minimaxcode", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/opencodezen", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/qoder", allowlist: []string{"core", "hostbridge", "logger", "safe"}},

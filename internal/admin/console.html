@@ -491,29 +491,6 @@ details.fold > div { padding: 0 0 8px; }
         <button class="act danger" id="btnDeleteAccounts" disabled>删除</button>
       </div>
 
-      <div class="card" id="quotaCredentialBox">
-        <h2 id="quotaCredentialTitle">书生 Token Plan · 墨点授权（可选）</h2>
-        <div class="hint">模型调用使用你填写的 Key；此处只为所选账号绑定“我的墨点”余额。</div>
-        <div class="row">
-          <label for="quotaCredentialAccountSelect">Token Plan 账号</label>
-          <select id="quotaCredentialAccountSelect" class="grow" disabled><option value="">连接管理密钥并加载账号后选择</option></select>
-          <button class="act primary" id="btnQuotaAuthorizationGenerate" disabled>生成授权地址</button>
-        </div>
-        <div class="hint" id="quotaCredentialHint">先连接上方 CPA 管理密钥，再选择已添加 Key 的 Token Plan 账号。</div>
-        <div class="row">
-          <input id="quotaAuthorizationUrl" type="text" readonly class="grow mono" aria-label="Token Plan 授权地址" placeholder="点击“生成授权地址”后显示" autocomplete="off">
-          <a id="quotaAuthorizationLink" class="act" target="_blank" rel="noopener" hidden>打开授权地址</a>
-          <button class="act" id="btnCopyQuotaAuthorizationUrl" disabled>复制地址</button>
-        </div>
-        <div class="hint">① 打开授权地址并登录（已登录会直接跳转） → ② 复制登录后的完整回调网址 → ③ 粘贴并绑定本账号</div>
-        <textarea id="inputQuotaCredential" rows="4" autocomplete="off" spellcheck="false"
-          aria-label="余额网页凭证" placeholder="粘贴授权登录后的完整回调网址；也支持余额请求 cURL" style="width:100%;box-sizing:border-box;-webkit-text-security:disc"></textarea>
-        <div class="row">
-        <button class="act primary" id="btnQuotaCredentialSave" disabled>绑定当前账号并查询墨点</button>
-          <button class="act" id="btnQuotaCredentialCancel">清空回调</button>
-        </div>
-      </div>
-
       <div class="card" id="smsBox" hidden>
         <h2 id="smsTitle">手机验证码登录</h2>
         <div class="row">
@@ -556,19 +533,36 @@ details.fold > div { padding: 0 0 8px; }
         </details>
       </div>
 
-      <div class="card" id="apiKeyBox" hidden>
-        <h2 id="apiKeyTitle">添加 API Key 账号</h2>
-        <textarea id="inputCredentialCurl" rows="5" hidden autocomplete="off" spellcheck="false"
-          aria-label="cURL (bash) 或网页凭证 JSON" style="width:100%;box-sizing:border-box;-webkit-text-security:disc"
-          placeholder="直接粘贴整段 cURL (bash)，也可粘贴网页凭证 JSON"></textarea>
-        <div class="row">
-          <input type="password" id="inputApiKey" placeholder="输入 API Key（必填）" class="grow-2" autocomplete="off" spellcheck="false">
-          <input type="text" id="inputApiLabel" placeholder="备注名称（可选）" class="grow">
-          <button class="act primary" id="btnSubmitApiKey">保存账号</button>
-          <button class="act" id="btnCancelApiKey">取消</button>
+      <div class="modal" id="apiKeyBox" hidden role="dialog" aria-modal="true" aria-labelledby="apiKeyTitle">
+        <div class="modal-box">
+          <h2 id="apiKeyTitle">完成授权</h2>
+          <div class="row" id="apiKeyFields">
+            <label for="inputApiKey" class="sr-only">模型 API Key</label>
+            <input type="password" id="inputApiKey" placeholder="输入 API Key（必填）" class="grow-2" autocomplete="off" spellcheck="false">
+            <label for="inputApiLabel" class="sr-only">账号备注</label>
+            <input type="text" id="inputApiLabel" placeholder="备注名称（可选）" class="grow">
+          </div>
+          <div class="hint" id="apiKeyHint"></div>
+          <div class="row"><button class="act" id="btnToggleCredentialMode" hidden>粘贴凭证</button></div>
+        <div id="quotaCredentialBox" hidden>
+          <h3>墨点授权（可选）</h3>
+          <div class="hint" id="quotaCredentialHint"></div>
+          <div class="row">
+            <button class="act" id="btnQuotaAuthorizationGenerate">生成授权地址</button>
+            <input id="quotaAuthorizationUrl" type="text" readonly class="grow mono" aria-label="墨点授权地址" placeholder="生成后可复制或打开" autocomplete="off">
+            <a id="quotaAuthorizationLink" class="act" target="_blank" rel="noopener" hidden>打开授权地址</a>
+            <button class="act" id="btnCopyQuotaAuthorizationUrl" disabled>复制地址</button>
+          </div>
+          <label for="inputQuotaCredential">授权回调或余额 cURL</label>
+          <textarea id="inputQuotaCredential" rows="4" autocomplete="off" spellcheck="false"
+            aria-label="授权回调或余额 cURL" placeholder="登录后粘贴完整回调网址，也可粘贴余额请求的 cURL" style="width:100%;box-sizing:border-box;-webkit-text-security:disc"></textarea>
+          <div class="hint">填写 Key 后生成授权地址，登录并复制完整回调网址到这里；也可直接粘贴余额请求 cURL。留空时仅保存模型 Key。</div>
         </div>
-        <div class="hint" id="apiKeyHint">请输入从官网获取的 API Key，保存后自动在 auth 目录创建凭证。</div>
-        <div class="row"><button class="act" id="btnToggleCredentialMode" hidden>粘贴凭证</button></div>
+          <div class="row" style="margin-top:16px">
+            <button class="act primary" id="btnSubmitApiKey">完成授权</button>
+            <button class="act" id="btnCancelApiKey">取消</button>
+          </div>
+        </div>
       </div>
 
       <div id="accounts"></div>
@@ -1189,107 +1183,6 @@ details.fold > div { padding: 0 0 8px; }
     return text.slice(0, 4) + "***" + text.slice(-4);
   }
 
-  // ---- 常驻单账号墨点授权入口 ----
-  var quotaCredentialAccount = null;
-  var quotaCredentialGeneration = 0;
-  function closeQuotaCredential() {
-    quotaCredentialGeneration++;
-    document.getElementById("inputQuotaCredential").value = "";
-    document.getElementById("quotaAuthorizationUrl").value = "";
-    document.getElementById("quotaAuthorizationLink").hidden = true;
-    document.getElementById("btnCopyQuotaAuthorizationUrl").disabled = true;
-    document.getElementById("btnQuotaCredentialSave").disabled = !quotaCredentialAccount;
-  }
-  function renderQuotaCredentialAccounts(status) {
-    var select = document.getElementById("quotaCredentialAccountSelect");
-    var current = select.value || "";
-    var accounts = (status.accounts || []).filter(function (a) { return a.vendor_id === "tokenplan" && a.quota_credential_hint; });
-    var enabled = accounts.filter(function (a) { return !a.disabled; });
-    select.textContent = "";
-    var placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = enabled.length ? "请选择要绑定的 Token Plan 账号" : (accounts.length ? "Token Plan 账号已停用，请先启用" : "请先添加书生 Token Plan Key");
-    select.appendChild(placeholder);
-    accounts.forEach(function (account) {
-      var option = document.createElement("option");
-      option.value = accountKey(account);
-      option.disabled = !!account.disabled;
-      option.textContent = accountDisplay(account) + (account.disabled ? " · 已停用" : (account.quota_credential_bound ? " · 已绑定墨点" : " · 未绑定墨点"));
-      select.appendChild(option);
-    });
-    select.disabled = enabled.length === 0;
-    if (enabled.some(function (a) { return accountKey(a) === current; })) select.value = current;
-    else select.value = enabled.length === 1 ? accountKey(enabled[0]) : "";
-    selectQuotaCredentialAccount();
-    if (accounts.length && !enabled.length) document.getElementById("quotaCredentialHint").textContent = "Token Plan 账号已停用，请在账号列表启用后生成授权地址。";
-  }
-  function selectQuotaCredentialAccount() {
-    var id = document.getElementById("quotaCredentialAccountSelect").value;
-    var account = ((lastStatus && lastStatus.accounts) || []).find(function (a) { return accountKey(a) === id && a.vendor_id === "tokenplan" && !a.disabled; }) || null;
-    if (!quotaCredentialAccount || !account || accountKey(quotaCredentialAccount) !== accountKey(account)) closeQuotaCredential();
-    quotaCredentialAccount = account;
-    document.getElementById("btnQuotaAuthorizationGenerate").disabled = !account;
-    document.getElementById("btnQuotaCredentialSave").disabled = !account;
-    document.getElementById("quotaCredentialHint").textContent = account
-      ? (account.quota_credential_bound ? "该账号已绑定墨点，可重新生成授权地址更新。" : "该账号未绑定墨点。点击“生成授权地址”开始。")
-      : "先添加该账号的 Token Plan Key，再选择账号生成授权地址。";
-  }
-  function generateQuotaAuthorization() {
-    var account = quotaCredentialAccount;
-    if (!account) { banner("err", "请先选择 Token Plan 账号"); return; }
-    closeQuotaCredential();
-    var generation = quotaCredentialGeneration;
-    document.getElementById("btnQuotaAuthorizationGenerate").disabled = true;
-    document.getElementById("quotaCredentialHint").textContent = "正在生成此账号的授权地址…";
-    api("POST", "/accounts/quota-auth/start", {account_id: accountKey(account)}).then(function (result) {
-      if (generation !== quotaCredentialGeneration) return;
-      if (!result || !result.ok) throw new Error((result && result.error) || "无法获取授权地址");
-      document.getElementById("quotaAuthorizationUrl").value = result.url;
-      var link = document.getElementById("quotaAuthorizationLink");
-      link.href = result.url;
-      link.hidden = false;
-      document.getElementById("btnCopyQuotaAuthorizationUrl").disabled = false;
-      document.getElementById("btnQuotaAuthorizationGenerate").disabled = false;
-      document.getElementById("quotaCredentialHint").textContent = "授权地址已生成。打开登录后，把浏览器地址栏的完整回调网址粘贴到下方；15 分钟内有效。";
-    }).catch(function (error) {
-      if (generation !== quotaCredentialGeneration) return;
-      document.getElementById("btnQuotaAuthorizationGenerate").disabled = false;
-      document.getElementById("quotaCredentialHint").textContent = error.message + "；也可粘贴已登录余额页的 cURL";
-    });
-  }
-  function openQuotaCredential(account) {
-    document.getElementById("quotaCredentialAccountSelect").value = accountKey(account);
-    selectQuotaCredentialAccount();
-    generateQuotaAuthorization();
-    document.getElementById("quotaCredentialBox").scrollIntoView({behavior:"smooth",block:"center"});
-  }
-  document.getElementById("quotaCredentialAccountSelect").addEventListener("change", selectQuotaCredentialAccount);
-  document.getElementById("btnQuotaAuthorizationGenerate").addEventListener("click", generateQuotaAuthorization);
-  document.getElementById("btnCopyQuotaAuthorizationUrl").addEventListener("click", function () {
-    var value = document.getElementById("quotaAuthorizationUrl").value;
-    if (!value) return;
-    navigator.clipboard.writeText(value).then(function () { banner("ok", "授权地址已复制"); }).catch(function () { banner("warn", "可选中授权地址输入框手动复制"); });
-  });
-  document.getElementById("btnQuotaCredentialCancel").addEventListener("click", closeQuotaCredential);
-  document.getElementById("btnQuotaCredentialSave").addEventListener("click", function () {
-    var account = quotaCredentialAccount;
-    var input = document.getElementById("inputQuotaCredential").value.trim();
-    if (!account || !input) { banner("err", "请粘贴登录成功后的回调链接"); return; }
-    var generation = quotaCredentialGeneration;
-    var accountID = accountKey(account);
-    document.getElementById("btnQuotaCredentialSave").disabled = true;
-    api("POST", "/accounts/quota-credential", {account_id: accountID, credential_curl: input}).then(function (result) {
-      if (generation !== quotaCredentialGeneration) return;
-      if (!result || !result.ok) throw new Error((result && result.error) || "绑定失败");
-      closeQuotaCredential();
-      banner("ok", "已为当前账号绑定墨点，正在查询余额");
-      return loadQuotas(true, [accountID]);
-    }).catch(function (error) {
-      if (generation !== quotaCredentialGeneration) return;
-      document.getElementById("btnQuotaCredentialSave").disabled = false;
-      banner("err", error.message);
-    });
-  });
   function quotaRemainingText(quota) {
     var metric = (quota.metrics || []).find(function (m) { return m.key === "credit_remain" && m.unit === "墨点"; });
     if (metric && Number.isFinite(Number(metric.value))) {
@@ -1706,7 +1599,6 @@ details.fold > div { padding: 0 0 8px; }
     return api("GET", "/status").then(function (status) {
       if (!status) return;
       lastStatus = status;
-      renderQuotaCredentialAccounts(status);
       renderAccounts(status);
       var settings = status.settings || {};
       document.getElementById("setAutoCheckin").checked = !!settings.auto_checkin;
@@ -2770,6 +2662,88 @@ details.fold > div { padding: 0 0 8px; }
   // 插件据此认出是哪一个会话的回调。
   var currentLoginState = "";
 
+  // ---- 授权表单中的可选余额绑定 ----
+  var quotaCredentialAccount = null;
+  var quotaCredentialGeneration = 0;
+  function closeQuotaCredential() {
+    quotaCredentialGeneration++;
+    document.getElementById("inputQuotaCredential").value = "";
+    document.getElementById("quotaAuthorizationUrl").value = "";
+    var link = document.getElementById("quotaAuthorizationLink");
+    link.hidden = true;
+    link.removeAttribute("href");
+    document.getElementById("btnCopyQuotaAuthorizationUrl").disabled = true;
+    document.getElementById("btnQuotaAuthorizationGenerate").disabled = false;
+  }
+  function generateQuotaAuthorization() {
+    if (!currentApiKeyVendor || !currentApiKeyVendor.quota_authorization) return;
+    var account = quotaCredentialAccount;
+    var apiKey = (document.getElementById("inputApiKey").value || "").trim();
+    if (!account && !apiKey) { banner("err", "请先填写完整 API Key"); return; }
+    closeQuotaCredential();
+    var generation = quotaCredentialGeneration;
+    document.getElementById("btnQuotaAuthorizationGenerate").disabled = true;
+    document.getElementById("quotaCredentialHint").textContent = "正在生成授权地址…";
+    var body = account ? {account_id: accountKey(account)} : {vendor: currentApiKeyVendor.id, api_key: apiKey};
+    api("POST", "/accounts/quota-auth/start", body).then(function (result) {
+      if (generation !== quotaCredentialGeneration) return;
+      if (!result || !result.ok) throw new Error((result && result.error) || "无法获取授权地址");
+      document.getElementById("quotaAuthorizationUrl").value = result.url;
+      var link = document.getElementById("quotaAuthorizationLink");
+      link.href = result.url;
+      link.hidden = false;
+      document.getElementById("btnCopyQuotaAuthorizationUrl").disabled = false;
+      document.getElementById("btnQuotaAuthorizationGenerate").disabled = false;
+      document.getElementById("quotaCredentialHint").textContent = "打开授权地址登录，再粘贴完整回调网址。授权地址 15 分钟内有效；可改用余额请求 cURL。";
+    }).catch(function (error) {
+      if (generation !== quotaCredentialGeneration) return;
+      document.getElementById("btnQuotaAuthorizationGenerate").disabled = false;
+      document.getElementById("quotaCredentialHint").textContent = error.message + "；也可粘贴已登录余额页的 cURL";
+    });
+  }
+  function openQuotaCredential(account) {
+    if (!account || account.disabled) { banner("err", "请先启用该账号再完成授权"); return; }
+    var vendor = vendorsById[account.vendor_id];
+    if (!vendor || !vendor.quota_credential_hint) return;
+    startAccountCredentialInput(vendor, "api_key", account);
+    generateQuotaAuthorization();
+  }
+  function submitExistingQuotaCredential() {
+    var account = quotaCredentialAccount;
+    var input = document.getElementById("inputQuotaCredential").value.trim();
+    if (!input) { banner("err", "请粘贴授权回调或余额 cURL"); return; }
+    var generation = accountAddGeneration;
+    var accountID = accountKey(account);
+    var btn = document.getElementById("btnSubmitApiKey");
+    btn.disabled = true;
+    btn.textContent = "保存中…";
+    api("POST", "/accounts/quota-credential", {account_id: accountID, credential_curl: input}).then(function (result) {
+      if (generation !== accountAddGeneration) return;
+      if (!result || !result.ok) throw new Error((result && result.error) || "绑定失败");
+      resetAccountAddFlow();
+      banner("ok", "当前账号授权已更新");
+      return loadQuotas(true, [accountID]);
+    }).catch(function (error) {
+      if (generation !== accountAddGeneration) return;
+      btn.disabled = false;
+      btn.textContent = "完成授权";
+      banner("err", error.message);
+    });
+  }
+  document.getElementById("btnQuotaAuthorizationGenerate").addEventListener("click", generateQuotaAuthorization);
+  document.getElementById("btnCopyQuotaAuthorizationUrl").addEventListener("click", function () {
+    var value = document.getElementById("quotaAuthorizationUrl").value;
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(function () { banner("ok", "授权地址已复制"); }).catch(function () { banner("warn", "可选中授权地址输入框手动复制"); });
+  });
+  document.getElementById("inputApiKey").addEventListener("input", function () {
+    if (currentApiKeyVendor && currentApiKeyVendor.quota_credential_hint) {
+      closeQuotaCredential();
+      document.getElementById("quotaCredentialHint").textContent = "Key 已更新，请重新生成授权地址或粘贴此账号的余额 cURL。";
+    }
+  });
+
+
   function supportsCredentialImport(vendor) {
     // AutoClaw 国际版的旧适配器尚未声明通用能力，保留既有粘贴入口。
     return !!vendor && (vendor.credential_import === true || vendor.id === "autoclawglobal");
@@ -2777,6 +2751,8 @@ details.fold > div { padding: 0 0 8px; }
 
   function resetAccountAddFlow() {
     accountAddGeneration++;
+    closeQuotaCredential();
+    quotaCredentialAccount = null;
     stopLoginPolling();
     resetLoginCaptcha();
     currentApiKeyVendor = null;
@@ -2785,13 +2761,13 @@ details.fold > div { padding: 0 0 8px; }
     currentLoginState = "";
     currentSmsVendor = null;
     smsSessionKey = "";
-    ["inputApiKey", "inputCredentialCurl", "inputApiLabel", "loginUrl", "loginPasteUrl", "inputSmsPhone", "inputSmsCode", "inputSmsLabel"].forEach(function (id) {
+    ["inputApiKey", "inputApiLabel", "loginUrl", "loginPasteUrl", "inputSmsPhone", "inputSmsCode", "inputSmsLabel"].forEach(function (id) {
       var field = document.getElementById(id);
       if (field) field.value = "";
     });
-    ["loginBox", "apiKeyBox", "smsBox", "loginCredentialRow", "loginPasteBox", "loginPasteRedirect"].forEach(function (id) {
+    ["loginBox", "apiKeyBox", "smsBox", "quotaCredentialBox", "loginCredentialRow", "loginPasteBox", "loginPasteRedirect"].forEach(function (id) {
       var box = document.getElementById(id);
-      if (box) { box.hidden = true; if (id === "loginBox") box.style.display = ""; }
+      if (box) { box.hidden = true; if (id === "loginBox" || id === "apiKeyBox") box.style.display = ""; }
     });
     ["loginStatus", "loginPasteStatus", "smsStatus"].forEach(function (id) {
       var status = document.getElementById(id);
@@ -2858,32 +2834,38 @@ details.fold > div { padding: 0 0 8px; }
     startAccountCredentialInput(vendor, "credential_json");
   }
 
-  function startAccountCredentialInput(vendor, mode) {
+  function startAccountCredentialInput(vendor, mode, account) {
     resetAccountAddFlow();
     currentApiKeyVendor = vendor;
     currentAccountInputMode = mode;
+    quotaCredentialAccount = account || null;
     var apiKeyBox = document.getElementById("apiKeyBox");
     if (!apiKeyBox) return;
     apiKeyBox.hidden = false;
+    apiKeyBox.style.display = "flex";
+    document.getElementById("apiKeyFields").hidden = !!account;
     var importing = mode === "credential_json";
-    var curlImport = importing && vendor.credential_curl_import === true;
-    document.getElementById("apiKeyTitle").textContent = (importing ? "粘贴 " : "添加 ") + vendor.name + (importing ? " 凭证" : " 账号");
+    var quotaBinding = !importing && !!vendor.quota_credential_hint;
+    document.getElementById("quotaCredentialBox").hidden = !quotaBinding;
+    document.getElementById("btnQuotaAuthorizationGenerate").hidden = !vendor.quota_authorization;
+    document.getElementById("quotaCredentialHint").textContent = vendor.quota_credential_hint || "";
+    document.getElementById("btnSubmitApiKey").textContent = quotaBinding ? "完成授权" : "保存账号";
+    document.getElementById("apiKeyTitle").textContent = quotaBinding ? "完成授权 · " + vendor.name : (importing ? "粘贴 " : "添加 ") + vendor.name + (importing ? " 凭证" : " 账号");
     var hint = (vendor.credential_import_hint || "").trim();
     if (!hint && vendor.id === "autoclawglobal") hint = "粘贴 AutoClaw 国际版凭证 JSON（含访问令牌与刷新令牌，可从 AutoClaw 桌面端登录态文件或 Agent2API 获取）。保存后插件会自动续期。";
     document.getElementById("apiKeyHint").textContent = importing
       ? hint || "粘贴该供应商的登录凭证 JSON，插件校验后会保存账号。"
-      : "请输入从官网申请的 API Key，保存后插件将自动在 auth 目录创建凭证文件。";
+      : quotaBinding ? "输入完整模型 API Key；可在下方一同完成墨点授权，确认后保存账号。" : "请输入从官网申请的 API Key，确认后保存账号。";
     var input = document.getElementById("inputApiKey");
-    var curlInput = document.getElementById("inputCredentialCurl");
-    input.hidden = curlImport;
-    curlInput.hidden = !curlImport;
+    input.hidden = false;
+    if (account) document.getElementById("apiKeyHint").textContent = "正在为 " + accountDisplay(account) + " 更新墨点授权；继续使用此账号已保存的模型 Key。";
     input.placeholder = importing ? "粘贴凭证 JSON（必填）" : "输入 API Key（必填）";
     var toggle = document.getElementById("btnToggleCredentialMode");
     if (toggle) {
       toggle.hidden = !supportsCredentialImport(vendor) || vendor.auth_mode !== "apikey" || vendor.id === "autoclawglobal";
       toggle.textContent = importing ? "改用 API Key" : "粘贴凭证";
     }
-    (curlImport ? curlInput : input).focus();
+    (account ? document.getElementById("inputQuotaCredential") : input).focus();
   }
 
   // ---- 页面内人机验证登录（AutoClaw 国际版等）----
@@ -3429,26 +3411,32 @@ details.fold > div { padding: 0 0 8px; }
     resetAccountAddFlow();
   });
 
+  document.getElementById("apiKeyBox").addEventListener("click", function (event) {
+    if (event.target === this) resetAccountAddFlow();
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !document.getElementById("apiKeyBox").hidden) resetAccountAddFlow();
+  });
+
   document.getElementById("btnCancelApiKey").addEventListener("click", function () {
     resetAccountAddFlow();
   });
 
   document.getElementById("btnSubmitApiKey").addEventListener("click", function () {
     if (!currentApiKeyVendor) return;
+    if (quotaCredentialAccount) { submitExistingQuotaCredential(); return; }
     var importing = currentAccountInputMode === "credential_json";
-    var supportsCurl = importing && currentApiKeyVendor.credential_curl_import === true;
-    var input = document.getElementById(supportsCurl ? "inputCredentialCurl" : "inputApiKey");
+    var input = document.getElementById("inputApiKey");
     var apiKey = (input.value || "").trim();
     var label = (document.getElementById("inputApiLabel").value || "").trim();
     if (!apiKey) {
-      banner("err", supportsCurl ? "请先粘贴 cURL (bash) 或网页凭证 JSON" : importing ? "请先粘贴凭证 JSON" : "API Key 不能为空");
+      banner("err", importing ? "请先粘贴凭证 JSON" : "API Key 不能为空");
       return;
     }
-    var curlImport = supportsCurl && /^curl(?:\.exe)?(?:\s|$)/.test(apiKey);
-    if (importing && !curlImport) {
+    if (importing) {
       var parsed;
       try { parsed = JSON.parse(apiKey); }
-      catch (err) { banner("err", supportsCurl ? "请粘贴完整的 cURL (bash) 或有效的网页凭证 JSON" : "凭证 JSON 格式无效，请检查后重试"); return; }
+      catch (err) { banner("err", "凭证 JSON 格式无效，请检查后重试"); return; }
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         banner("err", "凭证 JSON 必须是一个对象");
         return;
@@ -3459,12 +3447,11 @@ details.fold > div { padding: 0 0 8px; }
     btn.disabled = true;
     btn.textContent = "保存中…";
     var payload = { vendor: currentApiKeyVendor.id, label: label };
-    if (curlImport) {
-      payload.credential_curl = apiKey;
-    } else if (importing) {
+    if (importing) {
       payload.credential_json = apiKey;
     } else {
       payload.api_key = apiKey;
+      if (currentApiKeyVendor.quota_credential_hint) payload.quota_credential = document.getElementById("inputQuotaCredential").value.trim();
     }
     api("POST", "/accounts/add", payload).then(function (res) {
       if (generation !== accountAddGeneration) return;
@@ -3476,7 +3463,7 @@ details.fold > div { padding: 0 0 8px; }
       }
       banner("ok", res.message || "账号添加成功");
       resetAccountAddFlow();
-      loadStatus(true).catch(function () { });
+      loadStatus(true).then(function () { if (payload.quota_credential) return loadQuotas(true, [res.auth_id]); }).catch(function () { });
     }).catch(function (err) {
       if (generation !== accountAddGeneration) return;
       btn.disabled = false;
