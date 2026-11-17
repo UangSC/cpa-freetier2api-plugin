@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
 )
 
@@ -53,6 +54,14 @@ type transport struct {
 	stream bool
 }
 
+type wireProfileContextKey struct{}
+
+// WithWireProfile 使已确认的 HTTP 头表示配置经宿主桥传递，保留宿主代理策略。
+func WithWireProfile(ctx context.Context, profile pluginapi.HTTPWireProfile) context.Context {
+	profile.HeaderProfile = append([]string(nil), profile.HeaderProfile...)
+	return context.WithValue(ctx, wireProfileContextKey{}, &profile)
+}
+
 // RoundTrip 实现 http.RoundTripper：把请求转成宿主 HTTP 桥调用。
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
@@ -69,6 +78,11 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		URL:     req.URL.String(),
 		Headers: req.Header,
 		Body:    body,
+	}
+	if profile, ok := req.Context().Value(wireProfileContextKey{}).(*pluginapi.HTTPWireProfile); ok {
+		payload.WireProfile = profile
+	} else if profile, ok := ctx.Value(wireProfileContextKey{}).(*pluginapi.HTTPWireProfile); ok {
+		payload.WireProfile = profile
 	}
 	method := pluginabi.MethodHostHTTPDo
 	if t.stream {
@@ -142,10 +156,11 @@ func buildResponse(req *http.Request, status int, header http.Header, body io.Re
 // 只填扁平字段（method/url/headers/body）：宿主对扁平与嵌套两种形态都接受，
 // 扁平形态更简单且不容易漏字段。
 type rpcHostHTTPRequest struct {
-	Method  string      `json:"method,omitempty"`
-	URL     string      `json:"url,omitempty"`
-	Headers http.Header `json:"headers,omitempty"`
-	Body    []byte      `json:"body,omitempty"`
+	Method      string                     `json:"method,omitempty"`
+	URL         string                     `json:"url,omitempty"`
+	Headers     http.Header                `json:"headers,omitempty"`
+	Body        []byte                     `json:"body,omitempty"`
+	WireProfile *pluginapi.HTTPWireProfile `json:"wire_profile,omitempty"`
 }
 
 // rpcHostHTTPResponse 是 host.http.do 的响应体。

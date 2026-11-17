@@ -8,9 +8,23 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/hostbridge"
 )
 
 func TestAccountAddCredentialJSONAutoClawGlobal(t *testing.T) {
+	host := installFakeHost(t)
+	var saved pluginapi.HostAuthSaveRequest
+	hostbridge.Configure(func(callbackID, method string, payload any) (json.RawMessage, error) {
+		if method == pluginabi.MethodHostAuthSave {
+			if err := json.Unmarshal(mustMarshal(payload), &saved); err != nil {
+				t.Fatalf("解析假宿主凭证写入请求：%v", err)
+			}
+		}
+		return host.call(callbackID, method, payload)
+	})
 	setupTestPlugin(t)
 
 	credential := map[string]any{
@@ -43,9 +57,17 @@ func TestAccountAddCredentialJSONAutoClawGlobal(t *testing.T) {
 	if !strings.HasPrefix(payload.AuthID, "autoclawglobal-") {
 		t.Fatalf("auth file name = %q, want autoclawglobal-*", payload.AuthID)
 	}
+	if saved.Name != payload.AuthID || !json.Valid(saved.JSON) {
+		t.Fatalf("凭证应保存至假宿主：name=%q", saved.Name)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(saved.JSON, &stored); err != nil || stored["vendor"] != "autoclawglobal" || stored["accessToken"] != credential["accessToken"] {
+		t.Fatal("假宿主未收到完整且归属正确的凭证")
+	}
 }
 
 func TestAccountAddCredentialJSONRejectsMalformed(t *testing.T) {
+	installFakeHost(t)
 	setupTestPlugin(t)
 
 	response := managementCallWithBody(t, "POST", "/accounts/add", map[string]any{

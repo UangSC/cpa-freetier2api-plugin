@@ -107,7 +107,9 @@ type accountSummary struct {
 	SupportsCheckin bool         `json:"supports_checkin"`
 	// SupportsQuota 是「该供应商能否查出额度」的静态能力，与 Quota（查询结果）
 	// 是两件事：没有结果时它区分「还没查」与「永远查不出来」。
-	SupportsQuota bool `json:"supports_quota"`
+	SupportsQuota        bool   `json:"supports_quota"`
+	QuotaCredentialHint  string `json:"quota_credential_hint,omitempty"`
+	QuotaCredentialBound bool   `json:"quota_credential_bound,omitempty"`
 	// Claim 是该账号的套餐领取状态；SupportsClaim 为 false 时前端不渲染入口。
 	Claim         *state.ClaimRecord `json:"claim,omitempty"`
 	SupportsClaim bool               `json:"supports_claim"`
@@ -194,6 +196,10 @@ func (s *Service) listAccountSummaries(ctx context.Context, callbackID string) [
 			SupportsQuota:   supportsQuota(vendor),
 			SupportsClaim:   supportsClaim(vendor),
 		}
+		if provider, ok := core.As[core.QuotaCredentialProvider](vendor); ok {
+			summary.QuotaCredentialHint = provider.QuotaCredentialHint()
+			summary.QuotaCredentialBound = provider.QuotaCredentialBound(credential)
+		}
 		var modTime time.Time
 		if !entry.ModTime.IsZero() {
 			modTime = entry.ModTime
@@ -226,13 +232,15 @@ func (s *Service) listAccountSummaries(ctx context.Context, callbackID string) [
 		// 只有支持额度查询的供应商才读取额度缓存。不支持额度的账号（OpenCode
 		// ZEN、Cline 等）不该显示任何「剩余 / 总额」，即便缓存里存在同名字段。
 		if supportsQuota(vendor) {
-			if q := s.getCachedQuota(vendor.ID(), uid, summary.AuthID); q != nil {
+			binding, needsBinding := core.As[core.QuotaCredentialProvider](vendor)
+			if q := s.getCachedQuota(vendor.ID(), uid, summary.AuthID); q != nil && (!needsBinding || binding.QuotaCredentialBound(credential)) {
 				summary.Quota = q
 				// A successful quota read proves the credential is usable even when
 				// the host retained a stale runtime error from an earlier request.
 				// Do not mutate host auth state; only avoid displaying a contradictory
 				// error in this plugin's account overview.
-				summary.Status = displayedAccountStatus(summary.Status, q.OK)
+				_, independentBalance := core.As[core.QuotaCredentialProvider](vendor)
+				summary.Status = displayedAccountStatus(summary.Status, q.OK && !independentBalance)
 			}
 		}
 		out = append(out, summary)
@@ -481,6 +489,8 @@ type accountAddRequest struct {
 	// CredentialJSON 是供应商原生凭证 JSON（token 对等复杂凭证）。
 	// 提供时优先于 api_key：原样交给供应商的 Parse 归一，不套 api_key 信封。
 	CredentialJSON string `json:"credential_json,omitempty"`
+	// CredentialCurl 是浏览器 Copy as cURL (bash) 的原始文本，由供应商解析。
+	CredentialCurl string `json:"credential_curl,omitempty"`
 }
 
 func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
@@ -495,16 +505,32 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "vendor 不能为空"})
 	}
 	credentialJSON := strings.TrimSpace(body.CredentialJSON)
-	if apiKey == "" && credentialJSON == "" {
+	credentialCurl := strings.TrimSpace(body.CredentialCurl)
+	if apiKey == "" && credentialJSON == "" && credentialCurl == "" {
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "api_key 不能为空"})
 	}
 	vendor, okVendor := s.registry.ByID(vendorID)
 	if !okVendor {
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": fmt.Sprintf("未知供应商 %q", vendorID)})
 	}
+	var curlPreparer core.CredentialCurlImportPreparer
+	if credentialCurl != "" {
+		if credentialJSON != "" || apiKey != "" {
+			return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "请只提供一种凭证输入"})
+		}
+		var supportsCurl bool
+		curlPreparer, supportsCurl = core.As[core.CredentialCurlImportPreparer](vendor)
+		if !supportsCurl {
+			return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "该供应商不支持 cURL 凭证导入"})
+		}
+	}
 	var rawJSON []byte
 	seed := label
-	if credentialJSON != "" {
+	if credentialCurl != "" {
+		if seed == "" {
+			seed = core.RandomHex(8)
+		}
+	} else if credentialJSON != "" {
 		// 原生凭证 JSON：补 vendor 归属字段后原样落盘，交给供应商 Parse 归一。
 		var doc map[string]any
 		if err := json.Unmarshal([]byte(credentialJSON), &doc); err != nil || doc == nil {
@@ -543,9 +569,16 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 	callbackID := hostbridge.RequestCallbackID(req)
 	ctx, cancel := hostbridge.ManagementContext(req, requestTimeout)
 	defer cancel()
-	if credentialJSON != "" {
-		if preparer, exists := core.As[core.CredentialImportPreparer](vendor); exists {
-			prepared, err := preparer.PrepareCredentialImport(ctx, rawJSON)
+	if credentialJSON != "" || credentialCurl != "" {
+		preparer, exists := core.As[core.CredentialImportPreparer](vendor)
+		if exists || curlPreparer != nil {
+			var prepared []byte
+			var err error
+			if curlPreparer != nil {
+				prepared, err = curlPreparer.PrepareCredentialCurlImport(ctx, credentialCurl)
+			} else {
+				prepared, err = preparer.PrepareCredentialImport(ctx, rawJSON)
+			}
 			if err != nil {
 				return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			}
@@ -561,6 +594,29 @@ func (s *Service) handleAccountAddRequest(req pluginapi.ManagementRequest) plugi
 		}
 	}
 	fileName := core.FileNameFor(vendor.ID(), seed)
+	if identity, ok := core.As[core.APIKeyIdentityProvider](vendor); ok && apiKey != "" {
+		fileName = core.FileNameFor(vendor.ID(), identity.APIKeyAccountIdentity(apiKey))
+		existing, _ := s.pool.Load(ctx, callbackID, auth.Options{IncludeDisabled: true})
+		for _, account := range existing {
+			if account.Vendor.ID() == vendor.ID() && account.Credential.TokenValue() == apiKey {
+				fileName = account.Entry.Name
+				if fileName == "" {
+					fileName = account.Credential.FileIDValue() + ".json"
+				}
+				if !strings.HasSuffix(fileName, ".json") {
+					fileName += ".json"
+				}
+				var old, newFields map[string]any
+				if json.Unmarshal(account.RawJSON, &old) == nil && json.Unmarshal(rawJSON, &newFields) == nil {
+					for key, value := range newFields {
+						old[key] = value
+					}
+					rawJSON, _ = json.MarshalIndent(old, "", "  ")
+				}
+				break
+			}
+		}
+	}
 	if errLimit := s.pool.CheckVendorLimit(ctx, callbackID, vendor, fileName); errLimit != nil {
 		return JSONResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": errLimit.Error()})
 	}

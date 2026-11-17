@@ -740,9 +740,10 @@ func (c *Catalog) AliasFor(vendorID, modelID string) string {
 
 // ApplyAliases 给某供应商的模型清单换上别名（对外 ID）。
 func (c *Catalog) ApplyAliases(vendorID string, models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
+	fixedProvider, fixed := c.fixedContextProvider(vendorID)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if len(models) == 0 || (c.settings.ModelNameTag == ModelNameTagOff && len(c.aliases) == 0 && len(c.contexts) == 0) {
+	if len(models) == 0 || (!fixed && c.settings.ModelNameTag == ModelNameTagOff && len(c.aliases) == 0 && len(c.contexts) == 0) {
 		return models
 	}
 	prefix := strings.ToLower(strings.TrimSpace(vendorID)) + ":"
@@ -756,7 +757,10 @@ func (c *Catalog) ApplyAliases(vendorID string, models []pluginapi.ModelInfo) []
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
 		bare := strings.TrimSpace(model.ID)
-		if limit := c.contexts[contextScopedKey(vendorID, bare)]; limit > 0 {
+		if fixed {
+			model.ContextLength = fixedProvider.FixedModelContextLength(bare)
+			model.InputTokenLimit = model.ContextLength
+		} else if limit := c.contexts[contextScopedKey(vendorID, bare)]; limit > 0 {
 			model.ContextLength = limit
 			model.InputTokenLimit = limit
 		}

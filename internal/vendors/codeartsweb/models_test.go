@@ -55,7 +55,7 @@ func TestImportVerifiesIdentityAndAddsRoutingPrefix(t *testing.T) {
 	}
 }
 
-func TestModelsForAuthDoNotClaimClientTools(t *testing.T) {
+func TestModelsForAuthReportsClientToolBridge(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/chat/rest/me" {
@@ -82,8 +82,8 @@ func TestModelsForAuthDoNotClaimClientTools(t *testing.T) {
 	if model.ID != "deepseek-v4.1-flash-1017" || model.InputTokenLimit != 1044480 || model.ContextLength != 1048576 {
 		t.Fatalf("元数据错误：%+v", model)
 	}
-	if core.ModelSupportsTools(model) || core.ModelSupportsImages(model) {
-		t.Fatal("不得冒充客户端工具或图像能力")
+	if !core.ModelSupportsTools(model) || core.ModelSupportsImages(model) {
+		t.Fatal("必须报告客户端函数桥接，不能报告未实现的图像能力")
 	}
 }
 

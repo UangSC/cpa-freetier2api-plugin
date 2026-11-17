@@ -72,6 +72,12 @@ type CredentialImportPreparer interface {
 	PrepareCredentialImport(ctx context.Context, raw []byte) ([]byte, error)
 }
 
+// CredentialCurlImportPreparer 由支持直接导入浏览器 cURL 快照的供应商实现。
+// 实现方只解析文本，并在保存前完成凭证归一化和身份校验。
+type CredentialCurlImportPreparer interface {
+	PrepareCredentialCurlImport(ctx context.Context, text string) ([]byte, error)
+}
+
 // LoginSessionOwner 由「会话表自持、不登记到公共 LoginSessions」的供应商实现。
 //
 // 根层按 state 路由登录请求时先查公共登记表；查不到就逐个问供应商「这个会话
@@ -134,6 +140,26 @@ type Refresher interface {
 type QuotaProvider interface {
 	Quota(ctx context.Context, cred *Credential) (*pluginapi.QuotaFetchResponse, error)
 }
+
+// FixedModelContextProvider 由上下文固定在插件内、不接受本地覆盖的供应商实现。
+type FixedModelContextProvider interface {
+	FixedModelContextLength(modelID string) int64
+}
+
+// QuotaCredentialProvider 为所选账号准备可选余额授权，合并至同一插件凭证。
+type QuotaCredentialProvider interface {
+	QuotaCredentialHint() string
+	QuotaCredentialBound(cred *Credential) bool
+	PrepareQuotaCredential(ctx context.Context, cred *Credential, input string) ([]byte, error)
+}
+
+// QuotaAuthorizationProvider 提供单个凭证的可选网页登录授权地址。
+type QuotaAuthorizationProvider interface {
+	StartQuotaAuthorization(ctx context.Context, cred *Credential) (*pluginapi.AuthLoginStartResponse, error)
+}
+
+// APIKeyIdentityProvider 避免不同账号使用相同备注名时覆盖彼此的凭证。
+type APIKeyIdentityProvider interface{ APIKeyAccountIdentity(apiKey string) string }
 
 // CheckinProvider 由提供签到的供应商实现。
 //

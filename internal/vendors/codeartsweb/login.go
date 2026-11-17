@@ -3,6 +3,8 @@ package codeartsweb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"freetier2api-plugin/internal/core"
 )
@@ -11,7 +13,19 @@ import (
 func (v *adapter) AuthMode() string { return "cookie" }
 
 func (v *adapter) CredentialImportHint() string {
-	return "导入华为码道网页登录会话 JSON（cookie、cftk、headers），或含 curl 字段的 JSON。headers 保存浏览器 User-Agent 和客户端提示头。保存时会校验身份，默认添加 codeartsweb 模型前缀；会话过期后请重新导入。"
+	return "登录华为码道网页，在 F12 → Network 中打开模型菜单，找到 agents/detail 请求，右键选择 Copy → Copy as cURL (bash)，将整段文本直接粘贴到这里。保存时自动提取 Cookie、cftk 和浏览器请求头，校验账号并生成凭证 JSON，无需手动转换。也支持已有的网页凭证 JSON；会话过期后请重新复制导入。"
+}
+
+func (v *adapter) PrepareCredentialCurlImport(ctx context.Context, text string) ([]byte, error) {
+	text = strings.TrimSpace(text)
+	if len(text) == 0 || len(text) > maxCredentialBytes {
+		return nil, fmt.Errorf("cURL 快照为空或超过 256 KiB，请重新复制请求")
+	}
+	raw, err := json.Marshal(map[string]string{"curl": text})
+	if err != nil {
+		return nil, fmt.Errorf("无法解析 cURL 快照")
+	}
+	return v.PrepareCredentialImport(ctx, raw)
 }
 
 func (v *adapter) PrepareCredentialImport(ctx context.Context, raw []byte) ([]byte, error) {

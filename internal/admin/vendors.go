@@ -18,6 +18,8 @@ type vendorDescriptor struct {
 	CredentialImport bool `json:"credential_import"`
 	// CredentialImportHint 是供应商给用户的凭证获取和导入说明。
 	CredentialImportHint string `json:"credential_import_hint,omitempty"`
+	// CredentialCurlImport 报告该供应商支持直接粘贴 cURL (bash)。
+	CredentialCurlImport bool `json:"credential_curl_import,omitempty"`
 	// SMSLogin 报告该供应商支持「手机号 + 短信验证码」两步登录表单。
 	SMSLogin bool `json:"sms_login"`
 	// PasteCallback 报告该供应商的登录是否需要（也支持）「粘贴 localhost 回调链接」兜底。
@@ -51,6 +53,9 @@ func (s *Service) buildVendorsPayload() map[string]any {
 		if importer, okImport := core.As[core.CredentialImportProvider](vendor); okImport {
 			descriptor.CredentialImport = true
 			descriptor.CredentialImportHint = strings.TrimSpace(importer.CredentialImportHint())
+		}
+		if _, okCurl := core.As[core.CredentialCurlImportPreparer](vendor); okCurl {
+			descriptor.CredentialCurlImport = true
 		}
 		if submitter, okSubmit := core.As[core.CallbackSubmitter](vendor); okSubmit {
 			descriptor.PasteCallback = true

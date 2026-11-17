@@ -12,6 +12,7 @@ function setup() {
   let syncs = 0;
   const scope = vm.createContext({
     editableCell: options => options,
+	  el: (tag,text,className) => ({tag,text,className}),
     api: async (method, path, body) => {
       requests.push({ method, path, body });
       return { ok: true, context_override: body.context_length, context_length: body.context_length || 1000000 };
@@ -27,6 +28,11 @@ test('上下文按十进制显示，与上游 K/M 档位保持一致', () => {
   assert.equal(scope.formatTokens(200000), '200K');
   assert.equal(scope.formatTokens(400000), '400K');
   assert.equal(scope.formatTokens(1000000), '1M');
+});
+
+test('固定上下文只显示数值，不生成编辑器或保存操作', () => {
+  const state=setup();const cell=state.scope.modelContextCell({id:'intern-s2',context_length:262144,context_override:1000000,context_locked:true});
+  assert.match(cell.text,/固定/);assert.equal(cell.save,undefined);assert.equal(state.requests.length,0);
 });
 
 test('编辑值支持整数、K/M 和清空，拒绝非法或超范围输入', () => {

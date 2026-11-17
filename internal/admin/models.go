@@ -28,6 +28,7 @@ type consoleModel struct {
 	ContextLength         int64    `json:"context_length,omitempty"`
 	UpstreamContextLength int64    `json:"upstream_context_length"`
 	ContextOverride       int64    `json:"context_override,omitempty"`
+	ContextLocked         bool     `json:"context_locked,omitempty"`
 	MaxOutputTokens       int64    `json:"max_output_tokens,omitempty"`
 	Efforts               []string `json:"efforts,omitempty"`
 	DefaultEffort         string   `json:"default_effort,omitempty"`
@@ -83,6 +84,10 @@ func (s *Service) handleModelsList(req pluginapi.ManagementRequest) pluginapi.Ma
 	}
 
 	for index := range models {
+		if provider, fixed := manager.fixedContextProvider(models[index].VendorID); fixed {
+			models[index].ContextLength = provider.FixedModelContextLength(models[index].ID)
+			models[index].ContextLocked = true
+		}
 		models[index].Disabled = manager.IsDisabled(models[index].VendorID, models[index].ID)
 		models[index].Alias = manager.AliasFor(models[index].VendorID, models[index].ID)
 		models[index].UpstreamContextLength = models[index].ContextLength

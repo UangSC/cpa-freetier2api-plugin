@@ -22,7 +22,7 @@ type quotaJob struct {
 
 // identity 返回该任务的账号身份字段（结果与缓存共用）。
 func (j quotaJob) identity() quotaResult {
-	return quotaResult{
+	result := quotaResult{
 		AuthID:     core.FirstNonEmpty(j.entry.ID, j.entry.Name),
 		AuthIndex:  j.entry.AuthIndex,
 		Name:       j.entry.Name,
@@ -32,6 +32,7 @@ func (j quotaJob) identity() quotaResult {
 		VendorName: j.vendor.Name(),
 		Realm:      j.credential.RegionValue(),
 	}
+	return result
 }
 
 // quotaResult 是单个账号的额度结果。
@@ -142,6 +143,9 @@ func (s *Service) handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi
 	// 已有一轮在跑时不重复打上游：等它结束，再回读缓存。
 	jobs := make([]quotaJob, 0, len(loaded))
 	for _, account := range loaded {
+		if provider, ok := core.As[core.QuotaCredentialProvider](account.Vendor); ok && !provider.QuotaCredentialBound(account.Credential) {
+			continue
+		}
 		job := quotaJob{entry: account.Entry, vendor: account.Vendor, credential: account.Credential}
 		// 不支持额度查询的供应商（如 OpenCode ZEN）不进查询轮次、不写缓存，
 		// 也不进 /quotas 结果——页面据 /status 的 supports_quota=false 直接显示
@@ -236,7 +240,8 @@ func (s *Service) runQuotaBatch(done chan struct{}, jobs []quotaJob) {
 		quota, errQuota := s.queryQuota(ctx, current)
 		if errQuota != nil {
 			identity := current.identity()
-			if kept, okKept := keepLastQuota(s.getCachedQuota(identity.VendorID, identity.UID, identity.AuthID), errQuota); okKept {
+			previous := s.getCachedQuota(identity.VendorID, identity.UID, identity.AuthID)
+			if kept, okKept := keepLastQuota(previous, errQuota); okKept {
 				// 有上次成功读数：返回它并标非实时，附上本次失败原因。
 				outcome.result = kept
 				return outcome

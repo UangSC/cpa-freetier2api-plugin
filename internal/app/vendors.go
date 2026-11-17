@@ -13,6 +13,7 @@ import (
 	"freetier2api-plugin/internal/vendors/qoder"
 	"freetier2api-plugin/internal/vendors/qwenwork"
 	"freetier2api-plugin/internal/vendors/raccoon"
+	"freetier2api-plugin/internal/vendors/tokenplan"
 	"freetier2api-plugin/internal/vendors/trae"
 	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/vendors/zcode"
@@ -31,6 +32,7 @@ func BuiltinFactories() []core.VendorFactory {
 		{Instances: qwenwork.Instances},
 		{Instances: raccoon.Instances},
 		{Instances: trae.Instances},
+		{Instances: tokenplan.Instances},
 		{Instances: workbuddy.Instances},
 		{Instances: zcode.Instances},
 	}

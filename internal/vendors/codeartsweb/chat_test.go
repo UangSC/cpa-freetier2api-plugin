@@ -294,7 +294,7 @@ func TestWebChatGenerationKeepsCredentialFailure(t *testing.T) {
 
 func TestWebChatUnsupportedInputBeforeCreatingTask(t *testing.T) {
 	for name, options := range map[string]map[string]any{
-		"tools":            {"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "test"}}}},
+		"tools":            {"tools": []any{map[string]any{"type": "web_search"}}},
 		"image":            {"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/image.png"}}}}}},
 		"sampling":         {"temperature": 0.2},
 		"invalid_limit":    {"max_tokens": 0},

@@ -37,6 +37,15 @@ tmp/
 *.out
 coverage.out
 
+# 一次性排查脚本、旧源码副本与合并备份
+/work/
+/scratch/
+/backup/
+/backups/
+*.bak
+*.orig
+*.rej
+
 # macOS
 **/.DS_Store
 *_TODO.md

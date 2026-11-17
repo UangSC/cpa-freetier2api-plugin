@@ -77,6 +77,11 @@ func ToPluginError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// 原生适配器可能已经完成映射；再次包装会丢失状态码与重试策略。
+	var mapped *PluginError
+	if errors.As(err, &mapped) {
+		return err
+	}
 	var upstreamErr UpstreamError
 	if errors.As(err, &upstreamErr) {
 		status := upstreamErr.HTTPStatus()

@@ -132,10 +132,11 @@ func (v *adapter) fetchModels(ctx context.Context, cred *Credential) ([]pluginap
 	for _, model := range models {
 		info := core.ModelInfoToPluginAPI(VendorID, core.ModelDescriptor{
 			ID: model.ID, Name: model.Name + "（网页）", ContextLength: model.ContextWindow, MaxOutputTokens: model.MaxOutput,
-			Description: "CodeArts 网页智能体通道；支持文本和思考流，多轮历史按角色传入；输出限长由代理保守执行。",
+			Description:   "CodeArts 网页智能体通道；支持文本、思考流与客户端函数文本桥接，多轮历史按角色传入；官网云端工具不会交给客户端，输出限长由代理保守执行。",
+			SupportsTools: true,
 		})
 		info.InputTokenLimit = model.Input
-		info.SupportedParameters = []string{"stream", "max_tokens", "max_completion_tokens", "reasoning_effort"}
+		info.SupportedParameters = []string{"stream", "max_tokens", "max_completion_tokens", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"}
 		result = append(result, info)
 	}
 	return result, nil

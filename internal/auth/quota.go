@@ -18,7 +18,11 @@ func Summary(response *pluginapi.QuotaFetchResponse) string {
 		if label == "" {
 			label = metric.Key
 		}
-		parts = append(parts, label+" "+FormatValue(metric.Value))
+		value := FormatValue(metric.Value)
+		if metric.Unit == "墨点" {
+			value = strconv.FormatFloat(metric.Value, 'f', 3, 64)
+		}
+		parts = append(parts, label+" "+value)
 	}
 	for _, group := range response.Groups {
 		for _, bucket := range group.Buckets {

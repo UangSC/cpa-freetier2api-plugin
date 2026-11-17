@@ -209,6 +209,7 @@ var layerRules = []layerRule{
 	{pkg: "vendors/qwenwork", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/raccoon", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/trae", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
+	{pkg: "vendors/tokenplan", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/workbuddy", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 	{pkg: "vendors/zcode", allowlist: []string{"core", "hostbridge", "logger", "safe"}},
 }

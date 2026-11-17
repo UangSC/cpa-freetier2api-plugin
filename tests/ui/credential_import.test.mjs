@@ -7,6 +7,7 @@ const html = readFileSync(new URL('../../internal/admin/console.html', import.me
 const loginCode = html.slice(html.indexOf('  var loginTimer = null;'), html.indexOf('  // 主「刷新」按钮执行 Token'));
 const qwen = { id: 'qwenwork', name: '千问办公', auth_mode: 'oauth', supports_login: true, credential_import: true, credential_import_hint: '从千问办公客户端导出凭证 JSON。' };
 const keyVendor = { id: 'key-vendor', name: 'API 渠道', auth_mode: 'apikey', supports_login: false, credential_import: true };
+const codeartsWeb = { id: 'codeartsweb', name: 'CodeArts 网页版', auth_mode: 'cookie', supports_login: false, credential_import: true, credential_curl_import: true };
 
 function deferred() {
   let resolve;
@@ -183,10 +184,67 @@ test('AutoClaw 国际版旧描述仍可从网页登录粘贴凭证，未声明�
   assert.equal(state.get('loginCredentialRow').hidden, true);
 });
 
-test('凭证输入保持密码类型并关闭自动填充，不新增明文展示控件', () => {
+test('凭证输入关闭自动填充，API Key 和多行快照均遮盖显示', () => {
   const input = html.match(/<input[^>]+id="inputApiKey"[^>]*>/)?.[0];
   assert.match(input, /type="password"/);
   assert.match(input, /autocomplete="off"/);
+  const capture = html.match(/<textarea[^>]+id="inputCredentialCurl"[^>]*>/)?.[0];
+  assert.match(capture, /autocomplete="off"/);
+  assert.match(capture, /-webkit-text-security:disc/);
+});
+
+test('网页渠道保留多行 cURL 原文交给插件解析，保存后清空', async () => {
+  const state = setup();
+  state.scope.startVendorAdd(codeartsWeb);
+  assert.equal(state.get('inputApiKey').hidden, true);
+  assert.equal(state.get('inputCredentialCurl').hidden, false);
+  assert.equal(state.get('inputCredentialCurl').focused, true);
+  const capture = "curl 'https://devcloud.cn-north-4.huaweicloud.com/chat/home' \\\r\n -b 'session=test' \\\r\n -H 'cftk: test'";
+  state.get('inputCredentialCurl').value = capture;
+  click(state, 'btnSubmitApiKey');
+  await flush();
+  assert.equal(state.requests.length, 1);
+  assert.equal(state.requests[0].path, '/accounts/add');
+  assert.equal(state.requests[0].body.credential_curl, capture);
+  assert.equal(state.requests[0].body.credential_json, undefined);
+  assert.equal(state.requests[0].body.api_key, undefined);
+  assert.equal(state.get('inputCredentialCurl').value, '');
+  assert.equal(state.get('apiKeyBox').hidden, true);
+  assert.deepEqual(state.storageWrites, []);
+});
+
+test('网页渠道仍接受 JSON，取消后清空快照，切换渠道恢复密码输入', async () => {
+  const state = setup();
+  state.scope.startVendorAdd(codeartsWeb);
+  const credential = '{"cookie":"session=test","cftk":"test"}';
+  state.get('inputCredentialCurl').value = credential;
+  click(state, 'btnSubmitApiKey');
+  await flush();
+  assert.equal(state.requests[0].body.credential_json, credential);
+  assert.equal(state.requests[0].body.credential_curl, undefined);
+  state.scope.startVendorAdd(codeartsWeb);
+  state.get('inputCredentialCurl').value = 'curl sensitive-value';
+  click(state, 'btnCancelApiKey');
+  assert.equal(state.get('inputCredentialCurl').value, '');
+  state.scope.startVendorAdd(keyVendor);
+  assert.equal(state.get('inputCredentialCurl').hidden, true);
+  assert.equal(state.get('inputApiKey').hidden, false);
+});
+
+test('其他渠道不接收 cURL，网页渠道拒绝非 cURL 非 JSON 文本且不回显', () => {
+  const state = setup();
+  state.scope.startVendorAdd(qwen);
+  click(state, 'btnPasteCredential');
+  state.get('inputApiKey').value = 'curl sensitive-value';
+  click(state, 'btnSubmitApiKey');
+  assert.equal(state.requests.length, 1); // 只有原来的授权链接请求。
+  assert.equal(state.get('inputCredentialCurl').hidden, true);
+  state.scope.startVendorAdd(codeartsWeb);
+  state.get('inputCredentialCurl').value = 'not-a-curl sensitive-value';
+  click(state, 'btnSubmitApiKey');
+  assert.equal(state.requests.length, 1);
+  assert.match(state.banners.at(-1)[1], /cURL \(bash\)/);
+  assert.doesNotMatch(state.banners.at(-1)[1], /sensitive-value/);
 });
 
 test('只提供凭证导入的 OAuth 渠道直接进入 JSON 模式', () => {
