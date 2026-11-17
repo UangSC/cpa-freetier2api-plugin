@@ -1186,9 +1186,15 @@ details.fold > div { padding: 0 0 8px; }
   function quotaRemainingText(quota) {
     var metric = (quota.metrics || []).find(function (m) { return m.key === "credit_remain" && m.unit === "墨点"; });
     if (metric && Number.isFinite(Number(metric.value))) {
-      return "我的墨点 " + Number(metric.value).toLocaleString("zh-CN", { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " 墨点";
+      return Math.trunc(Number(metric.value)) + " 墨点";
     }
     return quota.remain + " / " + (quota.has_total ? quota.total : "—");
+  }
+
+  function quotaCredentialExpired(quota) {
+    if (!quota) return false;
+    var reason = quota.ok ? (quota.stale ? quota.stale_reason : "") : quota.message;
+    return /凭证.*(?:失效|过期|无效)|授权.*(?:失效|过期)|(?:token|session).*expired|unauthorized|\b401\b/i.test(String(reason || ""));
   }
   // accountOriginalName 是账号在上游的原始名称（未设别名时展示的文本），
   // 名称未知时返回空串，由调用方决定怎么占位。
@@ -1505,7 +1511,12 @@ details.fold > div { padding: 0 0 8px; }
       // 「查询中…」。用「结果里有没有这条」反推会让前者永久卡在查询中。
       var quota = account.quota;
       if (account.quota_credential_hint && !account.quota_credential_bound) {
-        var unboundCell=el("td","未绑定墨点，绑定后可查询","muted");unboundCell.colSpan=2;row.appendChild(unboundCell);
+        var unboundCell=el("td","未绑定墨点","muted");unboundCell.title="绑定后可查询墨点余额";unboundCell.colSpan=2;row.appendChild(unboundCell);
+      } else if (quotaCredentialExpired(quota)) {
+        var expiredCell = el("td", "凭证失效", "muted");
+        expiredCell.colSpan = 2;
+        expiredCell.title = quota.stale ? quota.stale_reason : quota.message;
+        row.appendChild(expiredCell);
       } else if (!quota) {
         if (account.supports_quota) {
           // 首次进入或刚添加的短暂状态：进入页面会自动查一次，添加与手动

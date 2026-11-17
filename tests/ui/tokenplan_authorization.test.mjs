@@ -118,10 +118,14 @@ test('绑定失败保留输入，迟到的保存回执不干扰新表单', async
   assert.equal(state.get('inputApiKey').value, 'new-key');
 });
 
-test('停用账号不能生成授权，墨点显示仍保留三位小数', () => {
+test('停用账号不能生成授权，列表墨点只显示整数和单位', () => {
   const state = setup(); state.scope.openQuotaCredential({auth_id:'disabled', vendor_id:vendor.id, disabled:true});
   assert.equal(state.requests.length, 0); assert.match(state.messages[0][1], /启用/);
   const scope = vm.createContext({});
   vm.runInContext(html.slice(html.indexOf('  function quotaRemainingText('), html.indexOf('  // accountOriginalName')), scope);
-  assert.equal(scope.quotaRemainingText({metrics:[{key:'credit_remain',unit:'墨点',value:1234.567}]}), '我的墨点 1,234.567 墨点');
+  assert.equal(scope.quotaRemainingText({metrics:[{key:'credit_remain',unit:'墨点',value:1234.567}]}), '1234 墨点');
+  assert.equal(scope.quotaRemainingText({metrics:[{key:'credit_remain',unit:'墨点',value:10000}]}), '10000 墨点');
+  assert.equal(scope.quotaCredentialExpired({ok:false,message:'墨点网页登录凭证已过期，请重新粘贴余额 cURL；模型 API Key 不受影响'}), true);
+  assert.equal(scope.quotaCredentialExpired({ok:true,stale:true,stale_reason:'墨点网页授权已过期，请为此账号重新授权；模型 Key 不受影响'}), true);
+  assert.equal(scope.quotaCredentialExpired({ok:false,message:'额度查询超时'}), false);
 });
