@@ -9,8 +9,8 @@
 //  1. 回调通道（rpc.go / auth.go / management.go）：Call / CallCtx、凭证枚举、
 //     管理请求上下文。CGO 实现由 package main 注入（//export 只能出现在 main 包），
 //     测试用内存假宿主替换同一注入点。
-//  2. 并发准入：宿主回调在当前 ABI 下不可取消，超时的调用仍会占用一个 OS
-//     线程直到宿主返回，必须限流（默认 64）。
+//  2. 并发准入：同步宿主回调必须等待宿主返回；HTTP 请求通过 operation ID
+//     取消，普通调用限流为 64，清理操作使用独立槽位。
 //  3. 关闭排空：Shutdown 时先禁止新调用，再等待在飞调用返回，最后才允许
 //     宿主 dlclose 本动态库（在活跃 Go/CGO 栈上卸载会直接崩溃）。
 //  4. 出站 HTTP（http.go / sse.go）：Client 一次性取完整响应；StreamClient
@@ -24,8 +24,8 @@ package hostbridge
 // Package hostabi 是插件侧调用宿主回调（host.*）的唯一通道。
 //
 // 它负责三件事：
-//  1. 并发准入：宿主回调在当前 ABI 下不可取消，超时的调用仍会占用一个 OS
-//     线程直到宿主返回，必须限流（默认 64）；
+//  1. 并发准入：同步宿主回调必须等待宿主返回；HTTP operation 取消请求
+//     能够释放宿主请求，普通调用与控制调用分别限流；
 //  2. 关闭排空：Shutdown 时先禁止新调用，再等待在飞调用返回，最后才允许
 //     宿主 dlclose 本动态库（在活跃 Go/CGO 栈上卸载会直接崩溃）；
 //  3. 回调作用域：host_callback_id 绑定到 context，宿主据此把上游请求/响应
@@ -43,11 +43,17 @@ import (
 	"sync"
 	"time"
 
+	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/internal/logger"
 )
 
 // Caller 是宿主回调的底层实现（由 main 注入 CGO 版本，测试注入内存版本）。
 type Caller func(callbackID, method string, payload any) (json.RawMessage, error)
+
+// CallerOptions 声明注入的宿主能力；旧宿主和简化的测试宿主可继续使用默认值。
+type CallerOptions struct {
+	HTTPOperations bool
+}
 
 // ErrNotConfigured 表示宿主回调实现尚未注入。
 var ErrNotConfigured = errors.New("hostabi: caller is not configured")
@@ -60,20 +66,41 @@ const (
 )
 
 var (
-	callerMu sync.RWMutex
-	caller   Caller
+	callerMu       sync.RWMutex
+	caller         Caller
+	httpOperations bool
 
 	gateMu       sync.Mutex
 	shuttingDown bool
+	activeCalls  int
 	inflightWG   sync.WaitGroup
 	gate         = make(chan struct{}, maxConcurrentCalls)
+	controlGate  = make(chan struct{}, 8)
 )
 
 // Configure 注入宿主回调实现。由 main 在 init 里调用一次。
-func Configure(impl Caller) {
+func Configure(impl Caller, options ...CallerOptions) {
 	callerMu.Lock()
 	caller = impl
+	httpOperations = len(options) > 0 && options[0].HTTPOperations
 	callerMu.Unlock()
+}
+
+func httpOperationsEnabled() bool {
+	callerMu.RLock()
+	defer callerMu.RUnlock()
+	return httpOperations
+}
+
+// ResumeCalls 仅在旧回调已经排空后允许同一动态库实例再次初始化。
+func ResumeCalls() error {
+	gateMu.Lock()
+	defer gateMu.Unlock()
+	if activeCalls != 0 {
+		return errors.New("host callbacks are still active")
+	}
+	shuttingDown = false
+	return nil
 }
 
 func current() (Caller, error) {
@@ -91,10 +118,22 @@ func current() (Caller, error) {
 // callbackID 为空表示后台任务（无请求作用域）。优先使用 CallCtx，
 // 让回调 ID 跟随 context 传递。
 func Call(callbackID, method string, payload any) (json.RawMessage, error) {
-	if errAcquire := acquire(); errAcquire != nil {
+	return call(context.Background(), callbackID, method, payload)
+}
+
+func call(ctx context.Context, callbackID, method string, payload any) (json.RawMessage, error) {
+	slots := gate
+	switch method {
+	case pluginabi.MethodHostHTTPCancel, pluginabi.MethodHostHTTPStreamClose, pluginabi.MethodHostStreamClose:
+		slots = controlGate
+	}
+	if errAcquire := acquire(ctx, slots); errAcquire != nil {
 		return nil, errAcquire
 	}
-	defer release()
+	defer release(slots)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	impl, errCaller := current()
 	if errCaller != nil {
 		return nil, errCaller
@@ -104,32 +143,50 @@ func Call(callbackID, method string, payload any) (json.RawMessage, error) {
 
 // CallCtx 发起一次宿主回调，callback ID 从 context 取。
 func CallCtx(ctx context.Context, method string, payload any) (json.RawMessage, error) {
-	return Call(CallbackID(ctx), method, payload)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return call(ctx, CallbackID(ctx), method, payload)
 }
 
 // acquire 申请一个宿主调用槽位。
 //
 // 准入检查与 WaitGroup.Add 必须在同一把锁内完成，否则 Wait 可能观察到
 // 零计数，导致关闭排空提前返回并在活跃栈上 dlclose。
-func acquire() error {
+func acquire(ctx context.Context, slots chan struct{}) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	gateMu.Lock()
 	if shuttingDown {
 		gateMu.Unlock()
 		return errors.New("host callbacks unavailable: plugin is shutting down")
 	}
 	inflightWG.Add(1)
+	activeCalls++
 	gateMu.Unlock()
-	gate <- struct{}{}
-	return nil
+	select {
+	case slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		gateMu.Lock()
+		activeCalls--
+		gateMu.Unlock()
+		inflightWG.Done()
+		return ctx.Err()
+	}
 }
 
-func release() {
-	<-gate
+func release(slots chan struct{}) {
+	<-slots
+	gateMu.Lock()
+	activeCalls--
+	gateMu.Unlock()
 	inflightWG.Done()
 }
 
 // Inflight 返回当前在飞的宿主调用数。
-func Inflight() int { return len(gate) }
+func Inflight() int { return len(gate) + len(controlGate) }
 
 // WaitForShutdown 关闭准入并等待所有在飞宿主调用返回。
 //
@@ -160,7 +217,7 @@ func WaitForShutdown(diagEvery time.Duration) {
 		case <-done:
 			return
 		case <-ticker.C:
-			logger.Error("shutdown: waiting for in-flight host callbacks inflight=%d waited=%s (host callbacks are not cancelable)",
+			logger.Error("shutdown: waiting for in-flight host callbacks inflight=%d waited=%s",
 				Inflight(), time.Since(start).Round(time.Millisecond))
 		}
 	}

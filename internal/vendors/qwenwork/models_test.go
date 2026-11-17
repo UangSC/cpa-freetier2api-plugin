@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"freetier2api-plugin/cpasdk/pluginabi"
@@ -21,6 +22,36 @@ const modelsTestCatalog = `{"qwork":[
  {"key":"pro","enable":true,"max_input_tokens":1000000,"price_factor":1,"i18n":{"display_name":{"en":"Pro","zh":"高级"}}},
  {"key":"frontier-1","enable":true,"max_input_tokens":1000000,"price_factor":0.4,"context_config":{"1M":{"token_count":1000000},"200k":{"token_count":200000},"400k":{"token_count":400000}},"i18n":{"display_name":{"en":"Qwen4-Max-Preview","zh":"Qwen4-Max 预览版"}}}
 ]}`
+
+func TestModelLookupNormalizesCaseAndWhitespace(t *testing.T) {
+	paths := modelsTestHost(t, func(string) (int, string) {
+		return http.StatusOK, strings.ReplaceAll(modelsTestCatalog, "Qwen4-Max-Preview", "DeepSeek-V4.1-Flash")
+	})
+	v := Instances(core.Env{})[0].(*adapter)
+	credential := &Credential{Token: "test-token", UserID: "test-user"}
+	if _, err := v.modelsFor(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"deepseek-v4.1-flash", " DeepSeek-V4.1-Flash ", " FRONTIER-1 "} {
+		mode, err := v.modeFor(context.Background(), credential, name)
+		if err != nil || mode != "frontier-1" {
+			t.Fatalf("name=%q mode=%q err=%v", name, mode, err)
+		}
+	}
+	if len(*paths) != 1 {
+		t.Fatal("normalized cache hits must not refresh the catalog")
+	}
+}
+
+func TestModelLookupRejectsNormalizedNameCollision(t *testing.T) {
+	modelsTestHost(t, func(string) (int, string) {
+		return http.StatusOK, `{"qwork":[{"key":"one","i18n":{"display_name":{"en":"DeepSeek-V4.1-Flash"}}},{"key":"two","i18n":{"display_name":{"en":"deepseek-v4.1-flash"}}}]}`
+	})
+	v := Instances(core.Env{})[0].(*adapter)
+	if _, err := v.modelsFor(context.Background(), &Credential{Token: "test-token", UserID: "test-user"}); err == nil {
+		t.Fatal("ambiguous normalized ids were accepted")
+	}
+}
 
 func TestModelsParseOfficialNamesAndMillionTokenWindows(t *testing.T) {
 	models, err := parseModels([]byte(modelsTestCatalog))

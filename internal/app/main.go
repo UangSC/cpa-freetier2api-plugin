@@ -61,6 +61,7 @@ func (a *App) HandleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodPluginReconfigure:
 		return a.handlePluginReconfigure(request)
 	case pluginabi.MethodPluginQuiesce:
+		a.StopStreamAdmission()
 		a.StopBackgroundWork()
 		// quiesce 之后宿主可能立刻卸载动态库：队列里剩下的日志必须在这里落盘，
 		// 否则关停前最后几条（往往正是关停原因）会丢。
@@ -138,8 +139,8 @@ func (a *App) handlePluginRegister(request []byte) ([]byte, error) {
 	a.applyModelCatalog(cfg)
 	if !a.registered {
 		a.registered = true
-		a.StartBackgroundWork()
 	}
+	a.resumePluginWork()
 	logger.Info("registered: realms=%v state_dir=%s", cfg.EnabledRealms, cfg.StateDir)
 	return core.OKEnvelope(a.Registration())
 }
@@ -162,6 +163,7 @@ func (a *App) handlePluginReconfigure(request []byte) ([]byte, error) {
 		}
 	}
 	a.applyModelCatalog(cfg)
+	a.resumePluginWork()
 	logger.Info("reconfigured: realms=%v state_dir=%s", cfg.EnabledRealms, cfg.StateDir)
 	return core.OKEnvelope(a.Registration())
 }

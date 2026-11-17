@@ -10,6 +10,37 @@ import (
 	"testing"
 )
 
+func TestResumeCallsRequiresDrainedCallbacks(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	Configure(func(_, _ string, _ any) (json.RawMessage, error) {
+		close(started)
+		<-release
+		return json.RawMessage(`{}`), nil
+	})
+	done := make(chan struct{})
+	go func() { _, _ = Call("", "host.test", nil); close(done) }()
+	<-started
+	if ResumeCalls() == nil {
+		t.Error("resumed while callback was active")
+	}
+	close(release)
+	<-done
+	gateMu.Lock()
+	shuttingDown = true
+	gateMu.Unlock()
+	if err := ResumeCalls(); err != nil {
+		t.Fatal(err)
+	}
+	gateMu.Lock()
+	stopped := shuttingDown
+	gateMu.Unlock()
+	if stopped {
+		t.Fatal("drained bridge did not resume")
+	}
+	Configure(nil)
+}
+
 func TestCallbackIDBinding(t *testing.T) {
 	ctx := WithCallbackID(context.TODO(), "cb-1")
 	if got := CallbackID(ctx); got != "cb-1" {

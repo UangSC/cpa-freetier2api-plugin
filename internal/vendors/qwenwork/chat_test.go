@@ -254,7 +254,7 @@ func chatTestStreamHost(t *testing.T, chunks []string, inspect func(http.Header,
 func chatTestVendor() (*adapter, *core.Credential) {
 	vendor := Instances(core.Env{})[0].(*adapter)
 	model := Model{ID: "Qwen4-Max-Preview", Mode: "frontier-1", Source: "system", Format: "openai", ContextLength: 1000000}
-	vendor.modelModes[model.ID], vendor.modelsByMode[model.Mode] = model.Mode, model
+	vendor.modelModes[strings.ToLower(model.ID)], vendor.modelsByMode[model.Mode] = model.Mode, model
 	native := chatTestCredential()
 	return vendor, &core.Credential{VendorID: vendorID, Native: native, Token: native.Token}
 }

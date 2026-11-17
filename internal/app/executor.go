@@ -114,7 +114,10 @@ func (a *App) handleExecutorExecuteStream(request []byte) ([]byte, error) {
 		"Cache-Control": []string{"no-cache"},
 	}
 
-	streamCtx, cancelStream, finishStream := a.BeginPluginStream()
+	streamCtx, cancelStream, finishStream, errStream := a.BeginPluginStream()
+	if errStream != nil {
+		return nil, errStream
+	}
 	go func() {
 		defer finishStream()
 		// 兜底：runStreamExecution 已把供应商代码的 panic 转成错误帧，这里再挡住
@@ -158,6 +161,10 @@ func (a *App) runStreamExecution(streamCtx context.Context, cancelStream context
 		cancelStream: cancelStream,
 	}
 	errForward := executeStreamSafe(ctx, prepared, sink)
+	if errors.Is(context.Cause(streamCtx), errPluginStopping) {
+		closeStream(callbackID, streamID, pluginStoppingError())
+		return
+	}
 	// 下游主动断开会取消上下文，那不是错误，不该发错误帧给客户端。
 	if errForward != nil && streamCtx.Err() == nil {
 		closeStream(callbackID, streamID, errForward)

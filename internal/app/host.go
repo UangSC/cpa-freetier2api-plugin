@@ -5,6 +5,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"sync"
 	"time"
 
@@ -57,6 +59,33 @@ func (a *App) configureVendors(cfg pluginConfig) {
 
 const DefaultShutdownWaitTimeout = 10 * time.Second
 
+var errPluginStopping = errors.New("plugin is stopping")
+
+func pluginStoppingError() error {
+	return core.NewPluginError("plugin_stopping", "插件正在更新，请稍后重试", http.StatusServiceUnavailable)
+}
+
+// StopStreamAdmission 禁止新流进入；quiesce 时保留已经运行的流供其完成。
+func (a *App) StopStreamAdmission() {
+	a.streamMu.Lock()
+	a.streamStopping = true
+	a.streamMu.Unlock()
+}
+
+func (a *App) ActiveStreamCount() int {
+	a.streamMu.Lock()
+	defer a.streamMu.Unlock()
+	return len(a.streamCancels)
+}
+
+// resumePluginWork 在注册或回滚重配成功后恢复准入与后台任务。
+func (a *App) resumePluginWork() {
+	a.streamMu.Lock()
+	a.streamStopping = false
+	a.streamMu.Unlock()
+	a.StartBackgroundWork()
+}
+
 // StartBackgroundWork 启动后台循环（幂等）。
 func (a *App) StartBackgroundWork() {
 	a.backgroundMu.Lock()
@@ -93,14 +122,19 @@ func (a *App) BackgroundRunning() bool {
 }
 
 // BeginPluginStream 注册一个流式转发任务。
-func (a *App) BeginPluginStream() (context.Context, context.CancelFunc, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
+func (a *App) BeginPluginStream() (context.Context, context.CancelFunc, func(), error) {
 	a.streamMu.Lock()
+	if a.streamStopping {
+		a.streamMu.Unlock()
+		return nil, nil, nil, pluginStoppingError()
+	}
+	ctx, cancelCause := context.WithCancelCause(context.Background())
+	cancel := func() { cancelCause(context.Canceled) }
 	a.nextStreamKey++
 	key := a.nextStreamKey
-	a.streamCancels[key] = cancel
-	a.streamMu.Unlock()
+	a.streamCancels[key] = func() { cancelCause(errPluginStopping) }
 	a.streamWG.Add(1)
+	a.streamMu.Unlock()
 	var once sync.Once
 	finish := func() {
 		once.Do(func() {
@@ -111,12 +145,13 @@ func (a *App) BeginPluginStream() (context.Context, context.CancelFunc, func()) 
 			a.streamWG.Done()
 		})
 	}
-	return ctx, cancel, finish
+	return ctx, cancel, finish, nil
 }
 
 // WaitPluginStreams 取消并等待在途流。
 func (a *App) WaitPluginStreams(timeout time.Duration) {
 	a.streamMu.Lock()
+	a.streamStopping = true
 	cancels := make([]context.CancelFunc, 0, len(a.streamCancels))
 	for _, cancel := range a.streamCancels {
 		cancels = append(cancels, cancel)

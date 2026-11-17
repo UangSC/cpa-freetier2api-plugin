@@ -57,6 +57,7 @@ func TestQoderContextRegistrationAndBothExecutionModes(t *testing.T) {
 	}
 	execute := func(stream bool, want int64) {
 		t.Helper()
+		closedBefore := len(host.closedStreams())
 		method := pluginabi.MethodExecutorExecute
 		if stream {
 			method = pluginabi.MethodExecutorExecuteStream
@@ -76,7 +77,19 @@ func TestQoderContextRegistrationAndBothExecutionModes(t *testing.T) {
 		case <-time.After(3 * time.Second):
 			t.Fatal("upstream request was not sent")
 		}
-		testApp.WaitPluginStreams(3 * time.Second)
+		if stream {
+			deadline := time.NewTimer(3 * time.Second)
+			defer deadline.Stop()
+			tick := time.NewTicker(time.Millisecond)
+			defer tick.Stop()
+			for len(host.closedStreams()) <= closedBefore {
+				select {
+				case <-deadline.C:
+					t.Fatal("stream did not complete")
+				case <-tick.C:
+				}
+			}
+		}
 		if len(host.streamErrors()) > 0 {
 			t.Fatalf("stream errors: %v", host.streamErrors())
 		}

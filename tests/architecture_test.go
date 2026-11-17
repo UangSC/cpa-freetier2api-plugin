@@ -565,7 +565,22 @@ func vendorRootEntries(t *testing.T) (string, []os.DirEntry) {
 	if errRead != nil {
 		t.Fatalf("read vendors: %v", errRead)
 	}
-	return root, entries
+	// Git 不跟踪空目录；删除供应商源码后，Windows 工作副本可能留下空壳。
+	// 非空目录继续接受完整的文件、注册与依赖边界检查。
+	active := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			children, err := os.ReadDir(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("read vendor %s: %v", entry.Name(), err)
+			}
+			if len(children) == 0 {
+				continue
+			}
+		}
+		active = append(active, entry)
+	}
+	return root, active
 }
 
 func vendorDirectories(t *testing.T) []string {

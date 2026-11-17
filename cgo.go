@@ -84,6 +84,12 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	if plugin == nil {
 		return 1
 	}
+	if pluginApp.ActiveStreamCount() != 0 {
+		return 1
+	}
+	if err := hostbridge.ResumeCalls(); err != nil {
+		return 1
+	}
 	hostAPI = host
 	plugin.abi_version = C.uint32_t(pluginabi.ABIVersion)
 	plugin.call = C.cliproxy_plugin_call_fn(C.cliproxyPluginCall)
@@ -278,5 +284,5 @@ func nativeHostCallScoped(callbackID string, method string, payload any) (json.R
 
 // init 注入 CGO 实现：之后 root 与 internal 包统一走 hostbridge.Call。
 func init() {
-	hostbridge.Configure(nativeHostCallScoped)
+	hostbridge.Configure(nativeHostCallScoped, hostbridge.CallerOptions{HTTPOperations: true})
 }

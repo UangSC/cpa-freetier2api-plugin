@@ -98,7 +98,13 @@ func (v *adapter) modelsFor(ctx context.Context, credential *Credential) ([]plug
 	modes := make(map[string]string)
 	details := make(map[string]Model)
 	for _, model := range models {
-		modes[model.ID], modes[model.Mode] = model.Mode, model.Mode
+		for _, name := range []string{model.ID, model.Mode} {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if previous, exists := modes[key]; exists && previous != model.Mode {
+				return nil, fmt.Errorf("千问办公模型名称存在歧义")
+			}
+			modes[key] = model.Mode
+		}
 		details[model.Mode] = model
 	}
 	v.modelMu.Lock()
@@ -144,8 +150,9 @@ func (v *adapter) ModelsForAuth(ctx context.Context, credential *core.Credential
 func (v *adapter) ModelCredits() map[string]string { return v.credits.Snapshot() }
 
 func (v *adapter) modeFor(ctx context.Context, credential *Credential, model string) (string, error) {
+	key := strings.ToLower(strings.TrimSpace(model))
 	v.modelMu.RLock()
-	mode := v.modelModes[model]
+	mode := v.modelModes[key]
 	v.modelMu.RUnlock()
 	if mode != "" {
 		return mode, nil
@@ -154,7 +161,7 @@ func (v *adapter) modeFor(ctx context.Context, credential *Credential, model str
 		return "", err
 	}
 	v.modelMu.RLock()
-	mode = v.modelModes[strings.TrimSpace(model)]
+	mode = v.modelModes[key]
 	v.modelMu.RUnlock()
 	if mode == "" {
 		return "", core.NewPluginError("model_not_found", "千问办公没有该模型", 404)

@@ -66,7 +66,7 @@ func WithWireProfile(ctx context.Context, profile pluginapi.HTTPWireProfile) con
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	if t.ctx != nil {
-		ctx = t.ctx
+		ctx = WithCallbackID(ctx, CallbackID(t.ctx))
 	}
 	body, errBody := readRequestBody(req)
 	if errBody != nil {
@@ -81,12 +81,27 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if profile, ok := req.Context().Value(wireProfileContextKey{}).(*pluginapi.HTTPWireProfile); ok {
 		payload.WireProfile = profile
-	} else if profile, ok := ctx.Value(wireProfileContextKey{}).(*pluginapi.HTTPWireProfile); ok {
-		payload.WireProfile = profile
+	} else if t.ctx != nil {
+		if profile, ok := t.ctx.Value(wireProfileContextKey{}).(*pluginapi.HTTPWireProfile); ok {
+			payload.WireProfile = profile
+		}
 	}
 	method := pluginabi.MethodHostHTTPDo
 	if t.stream {
 		method = pluginabi.MethodHostHTTPDoStream
+	}
+	operation, errOperation := beginHTTPOperation(ctx)
+	if errOperation != nil {
+		return nil, errOperation
+	}
+	operationTransferred := false
+	defer func() {
+		if !operationTransferred {
+			operation.abort()
+		}
+	}()
+	if operation != nil {
+		payload.OperationID = operation.id
 	}
 	raw, errCall := CallCtx(ctx, method, payload)
 	if errCall != nil {
@@ -103,6 +118,8 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			// 看起来像"凭证被拒"，极难排查。宁可直接报协议不匹配。
 			return nil, fmt.Errorf("host http response has no status field (host ABI mismatch): %s", truncateForError(raw))
 		}
+		operation.stopWatching()
+		operationTransferred = true
 		return buildResponse(req, rpc.StatusCode, rpc.Headers, io.NopCloser(bytes.NewReader(rpc.Body))), nil
 	}
 
@@ -114,9 +131,11 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("host http stream response has no status field (host ABI mismatch): %s", truncateForError(raw))
 	}
 	streamBody := &streamBody{
-		ctx:      ctx,
-		streamID: rpc.StreamID,
+		ctx:       ctx,
+		streamID:  rpc.StreamID,
+		operation: operation,
 	}
+	operationTransferred = true
 	return buildResponse(req, rpc.StatusCode, rpc.Headers, streamBody), nil
 }
 
@@ -156,6 +175,7 @@ func buildResponse(req *http.Request, status int, header http.Header, body io.Re
 // 只填扁平字段（method/url/headers/body）：宿主对扁平与嵌套两种形态都接受，
 // 扁平形态更简单且不容易漏字段。
 type rpcHostHTTPRequest struct {
+	OperationID string                     `json:"operation_id,omitempty"`
 	Method      string                     `json:"method,omitempty"`
 	URL         string                     `json:"url,omitempty"`
 	Headers     http.Header                `json:"headers,omitempty"`
@@ -235,8 +255,9 @@ type rpcHostHTTPStreamCloseRequest struct {
 // 与宿主的约定：宿主返回 done=true 表示流结束；error 非空表示流错误。
 // 本类型负责把这两者翻译成 io.EOF 与 error。
 type streamBody struct {
-	ctx      context.Context
-	streamID string
+	ctx       context.Context
+	streamID  string
+	operation *httpOperation
 
 	mu       sync.Mutex
 	closed   bool
@@ -350,12 +371,14 @@ func (b *streamBody) Close() error {
 	}
 	b.closed = true
 	b.mu.Unlock()
+	defer b.operation.stopWatching()
 
 	if strings.TrimSpace(b.streamID) == "" {
 		return nil
 	}
-	_, errCall := CallCtx(b.ctx, pluginabi.MethodHostHTTPStreamClose, rpcHostHTTPStreamCloseRequest{StreamID: b.streamID})
+	_, errCall := Call(CallbackID(b.ctx), pluginabi.MethodHostHTTPStreamClose, rpcHostHTTPStreamCloseRequest{StreamID: b.streamID})
 	if errCall != nil {
+		b.operation.cancel()
 		errWrapped := fmt.Errorf("host http stream close: %w", errCall)
 		b.mu.Lock()
 		b.closeErr = errWrapped
